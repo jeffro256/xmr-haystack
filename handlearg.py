@@ -71,7 +71,7 @@ def validate_and_process(ns, wallet_pass=None):
 		'wallcmd' -> str, monero-wallet-cli shell command name
 	"""
 
-	settings = []
+	settings = {}
 	cache_base = appdirs.user_cache_dir('xmr-haystack')
 	default_cache_path = os.path.join(cache_base, 'xmrhaystack.json')
 	
@@ -148,6 +148,13 @@ def validate_and_process(ns, wallet_pass=None):
 		settings['cachein'] = None
 		settings['cacheout'] = None
 	else: # should cache
+		# Prepare cache dir
+		try:
+			os.makedirs(cache_base, exist_ok=True)
+		except:
+			print("Warning: could not prepare cache directory!")
+
+		# Work on input cache. Output cache depends on input cache if unspecified
 		if ns.cache_in is not None:
 			try:
 				settings['cachein'] = cache_in_file = ScanCache.load(ns.cache_in)

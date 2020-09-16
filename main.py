@@ -16,7 +16,7 @@ import xmrconn
 def main():
 	arg_parser = handlearg.get_parser()
 	args = arg_parser.parse_args()
-	
+
 	password = getpassword("Wallet password: ")
 
 	try:
@@ -26,15 +26,10 @@ def main():
 		print(ve)
 
 		return 1
-	
-	daemon_login = ':'.join([settings['duser'], settings['dpass']]) if settings['login'] else None	
+
+	daemon_login = ':'.join([settings['duser'], settings['dpass']]) if settings['dlogin'] else None
 	daemon = xmrconn.DaemonConnection(settings['daddr'], settings['dport'], settings['duser'], settings['dpass'])
 	wallet = xmrconn.WalletConnection(settings['walletf'], password, daemon.host(), daemon_login, cmd=settings['wallcmd'])
-	
-	# Check that login etc is valid for wallet
-	if not wallet.is_valid():
-		print('error opening wallet.', file=stderr)
-		return -1
 
 	# Ask wallet for table of transfer information. The password is passed through stdin
 	# Output from stdout is stored in variable res
