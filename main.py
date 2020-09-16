@@ -10,6 +10,8 @@ import subprocess as sp
 from sys import stdin, stdout, stderr
 from time import time
 
+import xmrconn
+
 #TODO: Perform lookup for every primary address in wallet
 #TODO: add command-line options
 #TODO: more graceful error handling
@@ -26,16 +28,18 @@ def main():
 		print(ve)
 		return 1
 	
+	daemon = xmr.conn
+	
 	daemon_addr = args.addr
 	daemon_port = args.port
+	user, pwd = args.login.split(':') if args.login is not None else (None, None)
 	wallet_cli_path = args.cli_exe
 	wallet_file = getattr(args, 'wallet file')[0].name
 	password = getpassword("Wallet password: ")
 
-	print("Getting keys from wallet...")
-
 	# Ask wallet for table of transfer information. The password is passed through stdin
 	# Output from stdout is stored in variable res
+	print("Getting keys from wallet...")
 	wallet_cmd_temp = '{} --wallet-file="{}" --daemon-host={}:{} incoming_transfers verbose'
 	wallet_cmd = wallet_cmd_temp.format(wallet_cli_path, wallet_file, daemon_addr, daemon_port)
 	wallet_proc = sp.Popen(wallet_cmd, shell=True, stdin=sp.PIPE, stdout=sp.PIPE)
@@ -73,8 +77,6 @@ def main():
 		print("bad output from wallet command", file=stderr)
 		return -1
 
-	#txids = list(map(lambda x: x['tx_id'], trans_data))
-
 	# Construct a dictionary where the keys are the global indexes of your one-time pubkeys
 	# and the values are empty (for now) lists of txs that your pubkeys are used in.
 	# Then contrust a dictionary where the keys are the global indexes of your one-time pubkeys
@@ -82,10 +84,9 @@ def main():
 	txs_by_key_index = {entry['global_index']: [] for entry in trans_data}
 	pubkey_by_index = {entry['global_index']: entry['pubkey'] for entry in trans_data}
 
-	print("Getting restore height from wallet...")
-
 	# Query the "restore height" from the wallet to find height to begin scanning at
 	# Output from stdout is stored in variable res
+	print("Getting restore height from wallet...")
 	wallet_cmd_temp = '{} --wallet-file="{}" --daemon-host={}:{} restore_height'
 	wallet_cmd = wallet_cmd_temp.format(wallet_cli_path, wallet_file, daemon_addr, daemon_port)
 	wallet_proc = sp.Popen(wallet_cmd, shell=True, stdin=sp.PIPE, stdout=sp.PIPE)
@@ -153,101 +154,6 @@ def main():
 	# We made it this far, yay!
 	return 0
 
-#################################
-##### RPC COMMAND FUNCTIONS #####
-#################################
-
-def get_info(addr='127.0.0.1', port=18081):
-	"""Returns json response from get_info RPC command"""
-
-	url = f'http://{addr}:{port}/get_info'
-	info = requests.get(url).json()
-
-	return info
-
-def get_transactions(txids, addr='127.0.0.1', port=18081):
-	"""
-	Returns list of transaction objects represented by JSON from get_transactions RPC command
-
-	txids: list of transaction ids/hashes
-	"""
-
-	# Should throw error if not iterable
-	iter(txids)
-
-	url = f'http://{addr}:{port}/get_transactions'
-	post_data = {'txs_hashes': txids, 'decode_as_json': True}
-	resp = requests.post(url, json=post_data)
-
-	try:
-		transactions = resp.json()
-	except:
-		print("Error! json decoding from monero daemon. Response shown below:", file=stderr)
-		print(resp.text, file=stderr)
-		print("Input to get_transactions shown below:", file=stderr)
-		print(txids, file=stderr)
-		return None
-
-	try:
-		trans_json = list(map(lambda x: json.loads(x['as_json']), transactions['txs']))
-	except KeyError:
-		print("Error! Node rejected your request because it is too large", file=stderr)
-		return None
-
-	if len(trans_json) != len(txids):
-		print("Error! Response length not equal to request length", file=stderr)
-		return None
-
-	return trans_json
-
-def get_outs(key_indexes, addr='127.0.0.1', port=18081):
-	"""
-	Returns list of output info objects from get_outs RPC command
-
-	key_indexes: list of one-time public key global indexes
-	"""
-
-	return get_outs_raw(key_indexes, addr=addr, port=port)['outs']
-
-def get_outs_raw(key_indexes, addr='127.0.0.1', port=18081):
-	"""
-	Returns raw json response from get_outs RPC command, including responses status, etc
-
-	key_indexes: list of one-time public key global indexes
-	"""
-
-	# Should throw error if not iterable
-	iter(key_indexes)
-
-	url = f'http://{addr}:{port}/get_outs'
-	post_data = {'outputs': [{'index': x} for x in key_indexes] }
-	outs = requests.post(url, json=post_data).json()
-
-	return outs
-
-
-def get_block(height, addr='127.0.0.1', port=18081):
-	"""
-	Returns json object representing block from get_block RPC command
-
-	height: height of said block
-	"""
-
-	url = f'http://{addr}:{port}/json_rpc'
-	post_data = {
-		'jsonrpc': '2.0',
-		'id': '0',
-		'method': 'get_block',
-		'params': {
-			'height': height
-		}
-	}
-
-	resp = requests.post(url, json=post_data).json()
-	block = resp['result']
-
-	return block
-
 ##################################
 ##### OTHER HELPER FUNCTIONS #####
 ##################################
@@ -277,15 +183,6 @@ def getpassword(prompt='Password: '):
 		return getpass.getpass(prompt)
 	else:
 		return stdin.readline().rstrip()
-
-def node_needs_login(addr='127.0.0.1', port=18081):
-	"""
-	Returns a boolean value whether the node at addr:port needs authorization to use RPC commands.
-	"""
-	
-	resp = requests.get(f'{addr}:{port}/get_info')
-	
-	return resp.status_code == 401
 
 def pretty_print_results(txs_by_key_index, pubkey_by_index):
 	"""
@@ -327,6 +224,11 @@ def get_parser():
 		default=18081,
 		type=int,
 		dest='port')
+	parser.add_argument('-l', '--daemon-login',
+		nargs=1,
+		help='monerod RPC login in the form of [username]:[password]',
+		type=str
+		dest='login')
 	parser.add_argument('-s', '--scan-height',
 		nargs=1,
 		help='rescan blockchain from specified height. defaults to wallet restore height',
@@ -363,10 +265,21 @@ def check_args(ns):
 	ns: Namespace object returned by argparse.ArgumentParser.parse_args
 	"""
 	
-	default_cache_path = 'scancache.json'
+	default_cache_path = 'xmrhaystack.json'
 	
-	# Check daemon address + port
+	# Check daemon login flag parseability
+	if ns.login is not None:
+		print("Warning: passing passwords as command-line arguments is unsafe!")
+	
+		login_comps = ns.login.split(':')
+		
+		if len(login_comps) != 2:
+			raise ValueError('error: --daemon-login must be in form [username]:[password]')
+	
+	# Check daemon address + port + login
 	try:
+		user, pwd = xmr.login.split(':') if xmr.login is not None else (None, None)
+		conn = xmrconn.DaemonConnection(ns.addr, ns.port, user, pwd)
 		info = get_info(addr=ns.addr, port=ns.port)
 	except:
 		err_msg = 'error: daemon at {}:{} not reachable'.format(ns.addr, ns.port)
@@ -379,6 +292,7 @@ def check_args(ns):
 	# good chance that the daemon will reject large get_transactions requests. Warn the user of this 
 	sync_url = 'http://{}:{}/json_rpc'.format(ns.addr, ns.port)
 	
+	print("Checking daemon access...")
 	try:
 		post_data = {'jsonrpc': '2.0', 'id': '0', 'method': 'sync_info'}
 		resp = requests.post(sync_url, json=post_data).json()
@@ -391,6 +305,7 @@ def check_args(ns):
 		print("Warning: daemon is in restricted RPC mode. Some functionality may not be available")
 	
 	# Check monero-wallet-cli
+	print("Checking wallet access...")
 	ns.cli_exe = ns.cli_exe if ns.cli_exe is not None else 'monero-wallet-cli'	
 	cmd = ns.cli_exe + ' --version'
 	proc = sp.Popen(cmd, shell=True, stdout=sp.PIPE)
@@ -406,7 +321,8 @@ def check_args(ns):
 	# Check cache file arguments
 	if ns.no_cache:
 		if ns.cache_in is not None or ns.cache_out is not None:
-			raise ValueError('--cache-input and --cache-output can\'t be set if --no-cache is set')
+			raise ValueError('error: --cache-input and --cache-output can\'t be set if" \
+				" --no-cache is set')
 	else:
 		if ns.cache_in is None:
 			try:

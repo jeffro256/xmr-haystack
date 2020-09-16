@@ -19,6 +19,9 @@ class DaemonConnection(object):
 		url = url_fmt.format(self.scheme, self.addr, self.port, endpoint)
 
 		return url
+	
+	def host(self):
+		return f'{self.addr}:{self.port}'
 
 	def auth(self):
 		if self.user is not None:
@@ -96,7 +99,7 @@ class DaemonConnection(object):
 
 		return outs
 
-	def get_block(height, addr='127.0.0.1', port=18081):
+	def get_block(height):
 		"""
 		Returns json object representing block from get_block RPC command
 
@@ -117,3 +120,13 @@ class DaemonConnection(object):
 		block = resp['result']
 
 		return block
+
+	def needs_login(self):
+		"""
+		Returns a boolean value whether the daemon needs authorization to use RPC commands.
+		"""
+	
+		resp = requests.get(self.url('/get_info'))
+	
+		return resp.status_code == 401
+
