@@ -1,13 +1,11 @@
 #!/usr/bin/python3
 
-import argparse
-from datetime import datetime
 import getpass
-import json
 import random
 from sys import stdin, stdout, stderr
 from time import time
 
+import handlearg
 import xmrconn
 
 #TODO: Perform lookup for every primary address in wallet
@@ -16,28 +14,22 @@ import xmrconn
 #TODO: update documentation for RPC funcs for addr and port
 
 def main():
-	arg_parser = get_parser()
+	arg_parser = handlearg.get_parser()
 	args = arg_parser.parse_args()
-	
+
+	password = getpassword("Wallet password: ")
+
 	try:
-		check_args(args)
+		settings = handlearg.validate_and_process(args, wallet_pass=password)
 	except ValueError as ve:
 		arg_parser.print_usage()
 		print(ve)
 
 		return 1
-	
-	daemon_login = f'{args.duser}:{args.dpwd}' if args.duser is not None else None
-	wallet_file = getattr(args, 'wallet file')
-	password = getpassword("Wallet password: ")
 
-	daemon = xmrconn.DaemonConnection(args.addr, args.port, args.duser, args.dpwd)
-	wallet = xmrconn.WalletConnection(wallet_file, password, daemon.host(), daemon_login, cmd=args.cli_exe)
-	
-	# Check that login etc is valid for wallet
-	if not wallet.is_valid():
-		print('error opening wallet.', file=stderr)
-		return -1
+	daemon_login = ':'.join([settings['duser'], settings['dpass']]) if settings['dlogin'] else None
+	daemon = xmrconn.DaemonConnection(settings['daddr'], settings['dport'], settings['duser'], settings['dpass'])
+	wallet = xmrconn.WalletConnection(settings['walletf'], password, daemon.host(), daemon_login, cmd=settings['wallcmd'])
 
 	# Ask wallet for table of transfer information. The password is passed through stdin
 	# Output from stdout is stored in variable res
@@ -70,7 +62,7 @@ def main():
 
 	# Loop through all transactions in all blocks in [start_height, end_height],
 	# adding txs to txs_by_key_index if tx contains a public key that belongs to us
-	tx_batch_count = 1 if args.restricted_rpc else 100
+	tx_batch_count = 1 if settings['restricted'] else 100
 	tx_hashes = []
 	last_time = time()
 	tx_found = 0
@@ -155,6 +147,7 @@ def pretty_print_results(txs_by_key_index, pubkey_by_index):
 
 	txs_by_key_index: {int: [str]}, dict of global indexes referencing a list of transactions 
 	"""
+
 	for key_index in txs_by_key_index:
 		pubkey = pubkey_by_index[key_index]
 
@@ -167,133 +160,8 @@ def pretty_print_results(txs_by_key_index, pubkey_by_index):
 				print("    tx: ", txid)
 		else:
 			print("    * no transactions found *")
-
-def get_parser():
-	""" Returns an argparse.ArgumentParser object for this program """
-
-	desc = 'America\'s favorite stealth address scanner\u2122'
-	parser = argparse.ArgumentParser(description=desc)
-	parser.add_argument('wallet file',
-		help='path to wallet file')#,
-		#type=argparse.FileType('r'))
-	parser.add_argument('-a', '--daemon-addr',
-		help='daemon address (e.g. node.xmr.to)',
-		default='127.0.0.1',
-		dest='addr')
-	parser.add_argument('-p', '--daemon-port',
-		help='daemon port (e.g. 18081)',
-		default=18081,
-		type=int,
-		dest='port')
-	parser.add_argument('-l', '--daemon-login',
-		help='monerod RPC login in the form of [username]:[password]',
-		dest='login')
-	parser.add_argument('-s', '--scan-height',
-		help='rescan blockchain from specified height. defaults to wallet restore height',
-		type=int,
-		dest='height')
-	parser.add_argument('-i', '--cache-input',
-		help='path to input cache file',
-		type=argparse.FileType('r+'),
-		dest='cache_in')
-	parser.add_argument('-o', '--cache-output',
-		help='path to output cache file',
-		type=argparse.FileType('w'),
-		dest='cache_out')
-	parser.add_argument('-n', '--no-cache',
-		help='do not read from cache file and do not save to cache file',
-		action='store_true')
-	parser.add_argument('-c', '--wallet-cli-path',
-		help='path to monero-wallet-cli executable. Helpful if executable is not in PATH',
-		type=argparse.FileType('r'),
-		dest='cli_exe_file')
-
-	return parser
-
-def check_args(ns):
-	"""
-	Checks the arguments in namespace for any conditions not handled by get_parser
-	
-	Raises a ValueError if there is a unfixable problem with the arguments. Attempts to fix
-	problems where it can and inserts defaults where argparse fell short.
-	
-	ns: Namespace object returned by argparse.ArgumentParser.parse_args
-	"""
-	
-	default_cache_path = 'xmrhaystack.json'
-	
-	# Check daemon login flag parseability
-	if ns.login is not None:
-		print("Warning: passing passwords as command-line arguments is unsafe!")
-	
-		login_comps = ns.login.split(':')
-		
-		if len(login_comps) != 2:
-			raise ValueError('error: --daemon-login must be in form [username]:[password]')
-
-		ns.duser, ns.dpwd = login_comps
-	else:
-		ns.duser, ns.dpwd = None, None
-	
-	# Check daemon address + port + login
-	conn = xmrconn.DaemonConnection(ns.addr, ns.port, ns.duser, ns.dpwd)
-
-	print("Checking daemon access...")
-	try:
-		info = conn.get_info()
-	except:
-		err_msg = 'error: daemon at {} not reachable'.format(conn.host())
-		raise ValueError(err_msg)
-	
-	if 'status' not in info or info['status'] != 'OK':
-		raise ValueError('error: daemon responded unexpectedly')
-	
-	# sync_info is a command only allowed in unrestricted RPC mode. If it isn't enabled, there's a
-	# good chance that the daemon will reject large get_transactions requests. Warn the user of this 
-	print("Checking restricted RPC command access...")
-
-	try:
-		sync_info = conn.sync_info()
-	except:
-		err_msg = 'error: daemon at {}:{} not reachable'.format(ns.addr, ns.port)
-		raise ValueError(err_msg)
-	
-	# If in unrestricted mode then resp['result']['status'] == 'OK'
-	ns.restricted_rpc = sync_info is None
-	if ns.restricted_rpc:
-		print("Warning: daemon is in restricted RPC mode. Some functionality may not be available")
-
-	
-	# Check monero-wallet-cli
-	ns.cli_exe = ns.cli_exe_file.name if ns.cli_exe_file else 'monero-wallet-cli'
-	if not xmrconn.WalletConnection.valid_executable(ns.cli_exe):
-		err_msg_temp = 'error: command "{}" gave a bad response. Try specifying --wallet-cli-path'
-		err_msg = err_msg_temp.format(ns.cli_exe)
-		raise ValueError(err_msg)
-
-	# Check cache file arguments
-	if ns.no_cache:
-		if ns.cache_in is not None or ns.cache_out is not None:
-			raise ValueError('error: --cache-input and --cache-output can\'t be set if" \
-				" --no-cache is set')
-	else:
-		if ns.cache_in is None:
-			try:
-				ns.cache_in = open(default_cache_path, 'r+')
-			except:
-				pass
-		
-		if ns.cache_out is None:
-			if ns.cache_in is None:
-				try:
-					ns.cache_out = open(default_cache_path, 'w')
-				except:
-					pass
-			else:
-				ns.cache_out = ns.cache_in
 				
 # Program entry point
 if __name__ == '__main__':
 	exitcode = main()
 	exit(0 if exitcode is None else exitcode)
-
