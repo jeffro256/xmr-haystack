@@ -60,6 +60,7 @@ def validate_and_process(ns, wallet_pass=None):
 
 	Returns: a dict containing following entries:
 		'walletf' -> str, valid path to monero wallet file
+		'height' -> int >= 0, height to scan from instead of default. None if program should decide
 		'daddr' -> str, valid address (port not included) of monero daemon
 		'dport' -> int, valid port of monero daemon
 		'dlogin' -> bool, True if valid login is specified, False if not specified
@@ -77,6 +78,12 @@ def validate_and_process(ns, wallet_pass=None):
 	default_cache_path = os.path.join(cache_base, 'xmrhaystack.json')
 
 	settings['walletf'] = getattr(ns, 'wallet file')
+
+	# Check scan height
+	settings['height'] = ns.height
+
+	if ns.height < 0:
+		raise ValueError('error: --height can not be less than zero')
 
 	# Check daemon login flag parseability
 	settings['dlogin'] = ns.login is not None
@@ -131,7 +138,7 @@ def validate_and_process(ns, wallet_pass=None):
 		err_msg = err_msg_temp.format(settings['wallcmd'])
 		raise ValueError(err_msg)
 
-	# Check wallet login is password is supplied
+	# Check wallet login if password is supplied
 	if wallet_pass is not None:
 		print("Checking wallet login...")
 		wallet = xmrconn.WalletConnection(settings['walletf'], wallet_pass, conn.host(), ns.login, cmd=settings['wallcmd'])

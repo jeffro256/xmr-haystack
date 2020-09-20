@@ -54,8 +54,20 @@ class BlobCache(object):
 
 				obj = blob_contents['data']
 				objs.append(obj)
-			except Exception as e:
-				print(e)
+			except:
+				pass
+
+		return objs
+
+	def clear_objs(self, key):
+		key_id = BlobCache.key_id(key)
+
+		if key_id in self.blobs:
+			self.blobs.pop(key_id, None)
+
+	def pop_objs(self, key):
+		objs = self.get_objs(key)
+		self.clear_objs(key)
 
 		return objs
 
@@ -76,9 +88,11 @@ class BlobCache(object):
 	def gen_key(cls, seed):
 		if not seed:
 			raise ValueError('key seed must not be falsey')
+		elif type(seed) == str:
+			seed = seed.encode()
 
 		h = hashlib.sha256()
-		h.update(seed.encode())
+		h.update(seed)
 		b = base64.b64encode(h.digest())
 		key = b[:44]
 
