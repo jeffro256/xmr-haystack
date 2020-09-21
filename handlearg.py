@@ -2,8 +2,8 @@ import appdirs
 import argparse
 import os.path
 
+from blobcache import BlobCache
 import xmrconn
-import blobcache
 
 def get_parser():
 	""" Returns an argparse.ArgumentParser object for this program """
@@ -82,7 +82,7 @@ def validate_and_process(ns, wallet_pass=None):
 	# Check scan height
 	settings['height'] = ns.height
 
-	if ns.height < 0:
+	if ns.height is not None and ns.height < 0:
 		raise ValueError('error: --height can not be less than zero')
 
 	# Check daemon login flag parseability
@@ -117,7 +117,7 @@ def validate_and_process(ns, wallet_pass=None):
 	settings['dport'] = ns.port
 
 	# sync_info is a command only allowed in unrestricted RPC mode. If it isn't enabled, there's a
-	# good chance that the daemon will reject large get_transactions requests. Warn the user of this 
+	# good chance that the daemon will reject large get_transactions requests. Warn the user of this
 	print("Checking restricted RPC command access...")
 
 	try:
@@ -176,7 +176,8 @@ def validate_and_process(ns, wallet_pass=None):
 				else:
 					cache_in_file = open(default_cache_path, 'w+')
 					settings['cachein'] = None
-			except:
+			except Exception as e:
+				print(e)
 				print(f"Can't open default cache file \"{default_cache_path}\". Continuing without cache...")
 				cache_in_file = None
 				settings['cachein'] = None
@@ -188,6 +189,10 @@ def validate_and_process(ns, wallet_pass=None):
 			settings['cacheout'] = ns.cache_out
 		else:
 			if cache_in_file is not None:
+				# If file has already been read as cache input, and output is same file, clear then assign
+				# cachin to cacheout
+				cache_in_file.seek(0)
+				cache_in_file.truncate()
 				settings['cacheout'] = cache_in_file
 			else:
 				try:

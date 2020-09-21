@@ -5,6 +5,7 @@ import random
 from sys import stdin, stdout, stderr
 from time import time
 
+from blobcache import BlobCache
 import handlearg
 import xmrconn
 
@@ -45,12 +46,18 @@ def main():
 	# some for the start height. We subtract a small amount from the starting height in case of a reorg and to defend
 	# against a malicious node attempting to guess our identity from the restore height. Finally calculate the height
 	# to end our scan on. It will possibly be updated later during our scan.
+	should_scan_height = True
+
 	if settings['caching'] and settings['cachein'] is not None:
 		print("Getting scan information from cache...")
 		txs_by_key_index, last_height = get_cached_info(settings['cachein'], pubkey_by_index, password)
-		height_offset = random.randint(25, 250)
-		start_height = max(last_height - height_offset, 0)
-	else:
+
+		if last_height is not None:
+			height_offset = random.randint(25, 250)
+			start_height = max(last_height - height_offset, 0)
+			should_scan_height = False
+
+	if should_scan_height:
 		print("Getting restore height from wallet...")
 		restore_height = wallet.get_restore_height()
 
@@ -60,7 +67,7 @@ def main():
 
 		height_offset = random.randint(25, 250)
 		start_height = max(restore_height - height_offset, 0)
-		txs_by_key_index = {i: [] for i in pubkey_by_index]
+		txs_by_key_index = {i: [] for i in pubkey_by_index}
 
 	end_height = max(daemon.get_info()['height'] - 1, start_height)
 
@@ -89,8 +96,8 @@ def main():
 			for i, tx in enumerate(txs):
 				# For each stealth address index in transaction
 				for kindex in get_key_indexes(tx):
-					# If index belongs to us
-					if kindex in txs_by_key_index:
+					# If index belongs to us and hasn't been added before
+					if kindex in txs_by_key_index and tx_hashes[i] not in txs_by_key_index[kindex]:
 						txs_by_key_index[kindex].append(tx_hashes[i])
 						tx_found += 1
 
@@ -111,6 +118,12 @@ def main():
 	print(txs_by_key_index)
 
 	pretty_print_results(txs_by_key_index, pubkey_by_index)
+
+	if settings['caching'] and settings['cacheout'] is not None:
+		cache = settings['cachein'] if settings['cachein'] is not None else BlobCache()
+		add_to_cache(cache, txs_by_key_index, pubkey_by_index, height, password)
+		cache.save(settings['cacheout'])
+		settings['cacheout'].close()
 
 	# We made it this far, yay!
 	return 0
