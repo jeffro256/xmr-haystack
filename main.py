@@ -73,10 +73,12 @@ def main():
 
 	# Loop through all transactions in all blocks in [start_height, end_height],
 	# adding txs to txs_by_key_index if tx contains a public key that belongs to us
-	tx_batch_count = 1 if settings['restricted'] else 100
+	tx_batch_count = 1 if settings['restricted'] else 1000
 	tx_hashes = []
 	last_time = time()
 	tx_found = 0
+	prog_fmt = "Scanning blockchain (height: {h}/{e}, progress: {p:.2f}%, found: {f})"
+	
 	for height in range(start_height, end_height + 1):
 		block = daemon.get_block(height)
 
@@ -85,8 +87,8 @@ def main():
 			tx_hashes += block['tx_hashes']
 
 		# By batching the responses, I hope to speed up the scanning
-		if (height % tx_batch_count == 0 or height == end_height) and tx_hashes:
-			txs = daemon.get_transactions(tx_hashes)
+		while len(tx_hashes) >= tx_batch_count or height == end_height:
+			txs = daemon.get_transactions(tx_hashes[:tx_batch_count])
 
 			# If txs returns None, then that means that the get_transactions failed
 			if txs is None:
@@ -103,16 +105,13 @@ def main():
 
 						print("Found tx:", tx_hashes[i])
 
-			tx_hashes.clear()
-
-		# if it has been at least a second since last print, print ptogress
-		new_time = time()
-		if new_time >= last_time + 1 and stdout.isatty():
-			prog_perc = (height - start_height) / (end_height - start_height) * 100
-			prog_line_temp = "Scanning blockchain (height: {}/{}, progress: {:.2f}%, found: {})"
-			prog_line = prog_line_temp.format(height, end_height, prog_perc, tx_found)
-			print(prog_line, end='\r')
-			last_time = new_time
+			tx_hashes = tx_hashes[tx_batch_count:]
+			
+			# Poll print progress
+			force = height == end_height
+			prog = (height - start_height) / (end_height - start_height) * 100
+			last_time = poll_progress_print(prog_fmt, last_time, force, h=height, e=end_height, 
+				p=prog, f=tx_found)
 
 	print("Done!\n")
 	print(txs_by_key_index)
@@ -177,6 +176,17 @@ def pretty_print_results(txs_by_key_index, pubkey_by_index):
 				print("    tx: ", txid)
 		else:
 			print("    * no transactions found *")
+			
+def poll_progress_print(fmt_str, last_time, delay=1, force=False, **fmtargs):
+	new_time = time()
+	
+	if (new_time >= last_time + delay or force) and stdout.isatty():
+		prog_str = fmt_str.format(**fmtargs) + '    '
+		print(prog_str, end='\r')
+		
+		return new_time
+	else:
+		return last_time
 
 def add_to_cache(blob_cache, txs_by_key_index, pubkey_by_index, height, password):
 	cache_keys_by_index = {i: BlobCache.gen_key(pubkey_by_index[i] + password) for i in pubkey_by_index}
@@ -220,3 +230,4 @@ def get_cached_info(blob_cache, pubkey_by_index, password):
 if __name__ == '__main__':
 	exitcode = main()
 	exit(0 if exitcode is None else exitcode)
+
