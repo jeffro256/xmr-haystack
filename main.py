@@ -5,13 +5,11 @@ import random
 from sys import stdin, stdout, stderr
 from time import time
 
+from blobcache import BlobCache
 import handlearg
 import xmrconn
 
 #TODO: Perform lookup for every primary address in wallet
-#TODO: add command-line options
-#TODO: more graceful error handling
-#TODO: update documentation for RPC funcs for addr and port
 
 def main():
 	arg_parser = handlearg.get_parser()
@@ -31,8 +29,9 @@ def main():
 	daemon = xmrconn.DaemonConnection(settings['daddr'], settings['dport'], settings['duser'], settings['dpass'])
 	wallet = xmrconn.WalletConnection(settings['walletf'], password, daemon.host(), daemon_login, cmd=settings['wallcmd'])
 
-	# Ask wallet for table of transfer information. The password is passed through stdin
-	# Output from stdout is stored in variable res
+	# Ask wallet for table of transfer information. The password is passed through stdin. Output from stdout
+	# is stored in variable res. Construct a dictionary 'pubkey_by_index' where the keys are the global indexes
+	# of your own one-time pubkeys and the values are the pubkeys
 	print("Getting keys from wallet...")
 	trans_data = wallet.get_incoming_transfers()
 
@@ -40,25 +39,37 @@ def main():
 		print("No transfers to show.", file=stderr)
 		return 0
 
-	# Construct a dictionary where the keys are the global indexes of your one-time pubkeys
-	# and the values are empty (for now) lists of txs that your pubkeys are used in.
-	# Then contrust a dictionary where the keys are the global indexes of your one-time pubkeys
-	# and the values are the pubkeys
-	txs_by_key_index = {entry['global_index']: [] for entry in trans_data}
 	pubkey_by_index = {entry['global_index']: entry['pubkey'] for entry in trans_data}
 
-	# Find restore height and subtract small random amount to not diclose real
-	# restore height to daemon. Also find current blockchain height
-	print("Getting restore height from wallet...")
-	restore_height = wallet.get_restore_height()
+	# If available, use the cache to query already built txs_by_key_index and last scan height. Use this information
+	# to get height to start scan. If cache not available, default to empty txs_by_key_index and restore height minus
+	# some for the start height. We subtract a small amount from the starting height in case of a reorg and to defend
+	# against a malicious node attempting to guess our identity from the restore height. Finally calculate the height
+	# to end our scan on. It will possibly be updated later during our scan.
+	should_scan_height = True
 
-	if restore_height is None:
-		print("bad output from wallet command", file=stderr)
-		return -1
+	if settings['caching'] and settings['cachein'] is not None:
+		print("Getting scan information from cache...")
+		txs_by_key_index, last_height = get_cached_info(settings['cachein'], pubkey_by_index, password)
 
-	height_offset = random.randint(20, 200)
-	start_height = max(restore_height - height_offset, 0)
-	end_height = max(daemon.get_info()['height'] - 10, start_height)
+		if last_height is not None:
+			height_offset = random.randint(25, 250)
+			start_height = max(last_height - height_offset, 0)
+			should_scan_height = False
+
+	if should_scan_height:
+		print("Getting restore height from wallet...")
+		restore_height = wallet.get_restore_height()
+
+		if restore_height is None:
+			print("bad output from wallet command", file=stderr)
+			return -1
+
+		height_offset = random.randint(25, 250)
+		start_height = max(restore_height - height_offset, 0)
+		txs_by_key_index = {i: [] for i in pubkey_by_index}
+
+	end_height = max(daemon.get_info()['height'] - 1, start_height)
 
 	# Loop through all transactions in all blocks in [start_height, end_height],
 	# adding txs to txs_by_key_index if tx contains a public key that belongs to us
@@ -85,8 +96,8 @@ def main():
 			for i, tx in enumerate(txs):
 				# For each stealth address index in transaction
 				for kindex in get_key_indexes(tx):
-					# If index belongs to us
-					if kindex in txs_by_key_index:
+					# If index belongs to us and hasn't been added before
+					if kindex in txs_by_key_index and tx_hashes[i] not in txs_by_key_index[kindex]:
 						txs_by_key_index[kindex].append(tx_hashes[i])
 						tx_found += 1
 
@@ -107,6 +118,12 @@ def main():
 	print(txs_by_key_index)
 
 	pretty_print_results(txs_by_key_index, pubkey_by_index)
+
+	if settings['caching'] and settings['cacheout'] is not None:
+		cache = settings['cachein'] if settings['cachein'] is not None else BlobCache()
+		add_to_cache(cache, txs_by_key_index, pubkey_by_index, height, password)
+		cache.save(settings['cacheout'])
+		settings['cacheout'].close()
 
 	# We made it this far, yay!
 	return 0
@@ -145,7 +162,7 @@ def pretty_print_results(txs_by_key_index, pubkey_by_index):
 	"""
 	Pretty prints the final results of the program
 
-	txs_by_key_index: {int: [str]}, dict of global indexes referencing a list of transactions 
+	txs_by_key_index: {int: [str]}, dict of global indexes referencing a list of transactions
 	"""
 
 	for key_index in txs_by_key_index:
@@ -160,7 +177,45 @@ def pretty_print_results(txs_by_key_index, pubkey_by_index):
 				print("    tx: ", txid)
 		else:
 			print("    * no transactions found *")
-				
+
+def add_to_cache(blob_cache, txs_by_key_index, pubkey_by_index, height, password):
+	cache_keys_by_index = {i: BlobCache.gen_key(pubkey_by_index[i] + password) for i in pubkey_by_index}
+
+	for ind in cache_keys_by_index:
+		cache_key = cache_keys_by_index[ind]
+
+		cache_obj = {
+			'height': height,
+			'index': ind,
+			'pubkey': pubkey_by_index[ind],
+			'txs': txs_by_key_index[ind]
+		}
+
+		blob_cache.clear_objs(cache_key)
+		blob_cache.add_obj(cache_obj, cache_key)
+
+def get_cached_info(blob_cache, pubkey_by_index, password):
+	cache_keys = [BlobCache.gen_key(pkey + password) for pkey in pubkey_by_index.values()]
+
+	objs = []
+	for cache_key in cache_keys:
+		objs.extend(blob_cache.get_objs(cache_key))
+
+	min_height = None
+	txs_by_index = {i: [] for i in pubkey_by_index}
+
+	for obj in objs:
+		height = obj['height']
+		index = obj['index']
+		txs = obj['txs']
+
+		if min_height is None or height < min_height:
+			min_height = height
+
+		txs_by_index[index] = txs
+
+	return txs_by_index, min_height
+
 # Program entry point
 if __name__ == '__main__':
 	exitcode = main()

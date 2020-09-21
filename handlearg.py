@@ -2,14 +2,15 @@ import appdirs
 import argparse
 import os.path
 
+from blobcache import BlobCache
 import xmrconn
-import scancache
 
 def get_parser():
 	""" Returns an argparse.ArgumentParser object for this program """
 
+	prog = 'python main.py'
 	desc = 'America\'s favorite stealth address scanner\u2122'
-	parser = argparse.ArgumentParser(description=desc)
+	parser = argparse.ArgumentParser(prog=prog, description=desc)
 	parser.add_argument('wallet file',
 		help='path to wallet file')
 	parser.add_argument('-a', '--daemon-addr',
@@ -49,16 +50,17 @@ def get_parser():
 def validate_and_process(ns, wallet_pass=None):
 	"""
 	Checks the arguments in namespace for any conditions not handled by get_parser
-	
+
 	Raises a ValueError if there is a unfixable problem with the arguments. Attempts to fix
 	problems where it can and inserts defaults where argparse fell short. Wallet password 
 	is not in ns because the wallet password shouldn't be passed on the command-line.
-	
+
 	ns: Namespace object returned by argparse.ArgumentParser.parse_args
 	wallet_pass: str, password for wallet. If None, then doesn't check wallet login
-	
+
 	Returns: a dict containing following entries:
 		'walletf' -> str, valid path to monero wallet file
+		'height' -> int >= 0, height to scan from instead of default. None if program should decide
 		'daddr' -> str, valid address (port not included) of monero daemon
 		'dport' -> int, valid port of monero daemon
 		'dlogin' -> bool, True if valid login is specified, False if not specified
@@ -66,7 +68,7 @@ def validate_and_process(ns, wallet_pass=None):
 		'dpass' -> str, valid daemon password. None if daemon_login == False
 		'restricted' -> bool, True if only restricted RPC is enabled
 		'caching' -> bool, True if program should cache, False only if explicitly specified
-		'cachein' -> ScanCache, cache object at --cache-input file. None if not caching or unable to load cache
+		'cachein' -> BlobCache, cache object at --cache-input file. None if not caching or unable to load cache
 		'cacheout' -> open() file, writable file at --cache-output. None if not caching
 		'wallcmd' -> str, monero-wallet-cli shell command name
 	"""
@@ -74,24 +76,30 @@ def validate_and_process(ns, wallet_pass=None):
 	settings = {}
 	cache_base = appdirs.user_cache_dir('xmr-haystack')
 	default_cache_path = os.path.join(cache_base, 'xmrhaystack.json')
-	
+
 	settings['walletf'] = getattr(ns, 'wallet file')
+
+	# Check scan height
+	settings['height'] = ns.height
+
+	if ns.height is not None and ns.height < 0:
+		raise ValueError('error: --height can not be less than zero')
 
 	# Check daemon login flag parseability
 	settings['dlogin'] = ns.login is not None
 
 	if ns.login is not None:
 		print("Warning: passing passwords as command line arguments is unsafe!")
-	
+
 		login_comps = ns.login.split(':')
-		
+
 		if len(login_comps) != 2:
 			raise ValueError('error: --daemon-login must be in form [username]:[password]')
 
 		settings['duser'], settings['dpass'] = login_comps
 	else:
 		settings['duser'], settings['dpass'] = None, None
-	
+
 	# Check daemon address + port + login
 	conn = xmrconn.DaemonConnection(ns.addr, ns.port, settings['duser'], settings['dpass'])
 
@@ -101,15 +109,15 @@ def validate_and_process(ns, wallet_pass=None):
 	except:
 		err_msg = 'error: daemon at {} not reachable'.format(conn.host())
 		raise ValueError(err_msg)
-	
+
 	if 'status' not in info or info['status'] != 'OK':
 		raise ValueError('error: daemon responded unexpectedly')
 
 	settings['daddr'] = ns.addr
 	settings['dport'] = ns.port
-	
+
 	# sync_info is a command only allowed in unrestricted RPC mode. If it isn't enabled, there's a
-	# good chance that the daemon will reject large get_transactions requests. Warn the user of this 
+	# good chance that the daemon will reject large get_transactions requests. Warn the user of this
 	print("Checking restricted RPC command access...")
 
 	try:
@@ -117,7 +125,7 @@ def validate_and_process(ns, wallet_pass=None):
 	except:
 		err_msg = 'error: daemon at {}:{} not reachable'.format(ns.addr, ns.port)
 		raise ValueError(err_msg)
-	
+
 	# If in unrestricted mode then resp['result']['status'] == 'OK'
 	settings['restricted'] = sync_info is None
 	if settings['restricted']:
@@ -130,7 +138,7 @@ def validate_and_process(ns, wallet_pass=None):
 		err_msg = err_msg_temp.format(settings['wallcmd'])
 		raise ValueError(err_msg)
 
-	# Check wallet login is password is supplied
+	# Check wallet login if password is supplied
 	if wallet_pass is not None:
 		print("Checking wallet login...")
 		wallet = xmrconn.WalletConnection(settings['walletf'], wallet_pass, conn.host(), ns.login, cmd=settings['wallcmd'])
@@ -157,18 +165,19 @@ def validate_and_process(ns, wallet_pass=None):
 		# Work on input cache. Output cache depends on input cache if unspecified
 		if ns.cache_in is not None:
 			try:
-				settings['cachein'] = cache_in_file = ScanCache.load(ns.cache_in)
+				settings['cachein'] = cache_in_file = BlobCache.load(ns.cache_in)
 			except:
 				raise ValueError(f'error: unable to open cache file "{ns.cache_in}"')
 		else: # cache in not specified
 			try:
 				if os.path.isfile(default_cache_path):
 					cache_in_file = open(default_cache_path, 'r+')
-					settings['cachein'] = ScanCache.load(cache_in_file)
+					settings['cachein'] = BlobCache.load(cache_in_file)
 				else:
 					cache_in_file = open(default_cache_path, 'w+')
 					settings['cachein'] = None
-			except:
+			except Exception as e:
+				print(e)
 				print(f"Can't open default cache file \"{default_cache_path}\". Continuing without cache...")
 				cache_in_file = None
 				settings['cachein'] = None
@@ -180,6 +189,10 @@ def validate_and_process(ns, wallet_pass=None):
 			settings['cacheout'] = ns.cache_out
 		else:
 			if cache_in_file is not None:
+				# If file has already been read as cache input, and output is same file, clear then assign
+				# cachin to cacheout
+				cache_in_file.seek(0)
+				cache_in_file.truncate()
 				settings['cacheout'] = cache_in_file
 			else:
 				try:
