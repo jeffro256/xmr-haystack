@@ -123,6 +123,7 @@ def main():
 		settings['cacheout'].close()
 
 	# We made it this far, yay!
+	print("Goodbye!")
 	return 0
 
 ##################################

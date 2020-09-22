@@ -10,8 +10,8 @@ long_description = (here / 'README.md').read_text(encoding='utf-8')
 # Fields marked as "Optional" may be commented out.
 
 setup(
-    name='xmr-haystack-jeffro256',
-    version='0.0.0',
+    name='xmr-haystack',
+    version='0.0.1',
     description='Manage your on-chain Monero privacy with xmr-haystack',
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -64,7 +64,6 @@ setup(
     project_urls={  # Optional
         'Bug Reports': 'https://github.com/jeffro256/xmr-haystack/issues',
         'Funding': 'https://github.com/jeffro256/xmr-haystack',
-        'Say Thanks!': 'mailto:jeffaryan7@gmail.com',
         'Source': 'https://github.com/jeffro256/xmr-haystack',
     }
 )

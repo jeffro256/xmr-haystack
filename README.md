@@ -5,10 +5,19 @@
 This program takes a Monero wallet file, scans the blockchain, and outputs transactions in which
 your one-time public outputs (stealth addresses) were used as decoys.
 
+## Installation
+
+A Python 3 environment is required to run this application. Given that you have a working Python 3
+environment, all you need to do to install this application is run the following command:
+
+```
+python3 -m pip install xmr-haystack
+```
+
 ## Usage
 
 ```
-usage: python -m xmr-haystack [-h] [-a ADDR] [-p PORT] [-l LOGIN] [-s HEIGHT] [-i CACHE_IN]
+python3 -m xmr-haystack [-h] [-a ADDR] [-p PORT] [-l LOGIN] [-s HEIGHT] [-i CACHE_IN]
 [-o CACHE_OUT] [-n] [-c CLI_EXE_FILE] wallet file
 
 America's favorite stealth address scanner™

@@ -8,7 +8,7 @@ from . import xmrconn
 def get_parser():
 	""" Returns an argparse.ArgumentParser object for this program """
 
-	prog = 'python -m xmr-haystack'
+	prog = 'python3 -m xmr-haystack'
 	desc = 'America\'s favorite stealth address scanner\u2122'
 	parser = argparse.ArgumentParser(prog=prog, description=desc)
 	parser.add_argument('wallet file',
