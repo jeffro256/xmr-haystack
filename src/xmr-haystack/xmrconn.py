@@ -22,7 +22,7 @@ class DaemonConnection(object):
 		url = url_fmt.format(self.scheme, self.addr, self.port, endpoint)
 
 		return url
-	
+
 	def host(self):
 		return f'{self.addr}:{self.port}'
 
@@ -80,9 +80,9 @@ class DaemonConnection(object):
 			transactions = resp.json()
 		except:
 			print("Error! json decoding from monero daemon. Response shown below:", file=sys.stderr)
-			print(resp.text, file=stderr)
+			print(resp.text, file=sys.stderr)
 			print("Input to get_transactions shown below:", file=sys.stderr)
-			print(txids, file=stderr)
+			print(txids, file=sys.stderr)
 			return None
 
 		try:
@@ -148,9 +148,9 @@ class DaemonConnection(object):
 		"""
 		Returns a boolean value whether the daemon needs authorization to use RPC commands.
 		"""
-	
+
 		resp = requests.get(self.url('/get_info'))
-	
+
 		return resp.status_code == 401
 
 class WalletConnection(object):
@@ -194,7 +194,7 @@ class WalletConnection(object):
 		if errcode != 0:
 			return None
 
-		# Populate trans_data with all of the data from wallet command 'incoming_transfers verbose' 
+		# Populate trans_data with all of the data from wallet command 'incoming_transfers verbose'
 		trans_data = []
 		for line in stdout.decode().split('\n'):
 			try:
@@ -226,7 +226,7 @@ class WalletConnection(object):
 			return None
 
 	@classmethod
-	def valid_executable(cls, cmd_name='monero-wallet-cli'):	
+	def valid_executable(cls, cmd_name='monero-wallet-cli'):
 		shell_args = [cmd_name, '--version']
 		proc = sp.Popen(shell_args, stdout=sp.PIPE)
 		stdout, _ = proc.communicate()

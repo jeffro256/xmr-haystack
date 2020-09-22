@@ -8,8 +8,8 @@ your one-time public outputs (stealth addresses) were used as decoys.
 ## Usage
 
 ```
-usage: python main.py [-h] [-a ADDR] [-p PORT] [-l LOGIN] [-s HEIGHT] [-i CACHE_IN] [-o CACHE_OUT] [-n] [-c CLI_EXE_FILE]
-                    wallet file
+usage: python -m xmr-haystack [-h] [-a ADDR] [-p PORT] [-l LOGIN] [-s HEIGHT] [-i CACHE_IN]
+[-o CACHE_OUT] [-n] [-c CLI_EXE_FILE] wallet file
 
 America's favorite stealth address scanner™
 
@@ -40,3 +40,8 @@ optional arguments:
 While this program works, it is still in *very* early dev stages. Use this program at your own risk;
 I take no responsibility for any lost funds or privacy, etc, etc. That said, I really hope you find
 this code useful and I would really appreciate any feedback. :)
+
+## Donate
+
+89tQx7bUmQDMdkgUjk5ZSfVpV3yGKZ6udWe4XGbBNE27iyxoYoWif8nHCLnvqjodaLENVGgBpWSFE2XGyjNKLT1bB8efQh5
+

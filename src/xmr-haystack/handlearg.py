@@ -2,8 +2,8 @@ import appdirs
 import argparse
 import os.path
 
-from blobcache import BlobCache
-import xmrconn
+from .blobcache import BlobCache
+from . import xmrconn
 
 def get_parser():
 	""" Returns an argparse.ArgumentParser object for this program """

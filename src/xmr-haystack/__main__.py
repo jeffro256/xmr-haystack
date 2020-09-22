@@ -1,15 +1,11 @@
-#!/usr/bin/python3
-
 import getpass
 import random
 from sys import stdin, stdout, stderr
 from time import time
 
-from blobcache import BlobCache
-import handlearg
-import xmrconn
-
-#TODO: Perform lookup for every primary address in wallet
+from .blobcache import BlobCache
+from . import handlearg
+from . import xmrconn
 
 def main():
 	arg_parser = handlearg.get_parser()
@@ -78,7 +74,7 @@ def main():
 	last_time = time()
 	tx_found = 0
 	prog_fmt = "Scanning blockchain (height: {h}/{e}, progress: {p:.2f}%, found: {f})"
-	
+
 	try:
 		for height in range(start_height, end_height + 1):
 			block = daemon.get_block(height)
@@ -88,7 +84,7 @@ def main():
 				tx_hashes += block['tx_hashes']
 
 			# By batching the responses, I hope to speed up the scanning
-			while len(tx_hashes) >= tx_batch_count or height == end_height:
+			while (len(tx_hashes) >= tx_batch_count or height == end_height) and tx_hashes:
 				txs = daemon.get_transactions(tx_hashes[:tx_batch_count])
 
 				# If txs returns None, then that means that the get_transactions failed
@@ -178,14 +174,14 @@ def pretty_print_results(txs_by_key_index, pubkey_by_index):
 				print("    tx: ", txid)
 		else:
 			print("    * no transactions found *")
-			
+
 def poll_progress_print(fmt_str, last_time, delay=1, force=False, **fmtargs):
 	new_time = time()
-	
+
 	if (new_time >= last_time + delay or force) and stdout.isatty():
 		prog_str = fmt_str.format(**fmtargs) + '    '
 		print(prog_str, end='\r')
-		
+
 		return new_time
 	else:
 		return last_time
@@ -232,4 +228,3 @@ def get_cached_info(blob_cache, pubkey_by_index, password):
 if __name__ == '__main__':
 	exitcode = main()
 	exit(0 if exitcode is None else exitcode)
-
