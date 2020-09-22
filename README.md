@@ -14,6 +14,21 @@ environment, all you need to do to install this application is run the following
 python3 -m pip install xmr-haystack
 ```
 
+If you are on Linux or MacOS and you would prefer to build from the source code, then the following
+commands will allow you to do so:
+
+```
+git clone https://github.com/jeffro256/xmr-haystack.git
+python -m pip install xmr-haystack
+```
+
+If you are Windows and would prefer to build from the source code, then follow these steps:
+
+1. Download the unzip source code from [Github](https://github.com/jeffro256/xmr-haystack).
+2. Open 'cmd' from the Start Menu
+3. Naviagte to newly unzipped directory in cmd
+4. Type `python3 -m pip install .`
+
 ## Usage
 
 ```

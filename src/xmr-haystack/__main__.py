@@ -69,7 +69,7 @@ def main():
 
 	# Loop through all transactions in all blocks in [start_height, end_height],
 	# adding txs to txs_by_key_index if tx contains a public key that belongs to us
-	tx_batch_count = 1 if settings['restricted'] else 1000
+	tx_batch_count = 100 if settings['restricted'] else 10000
 	tx_hashes = []
 	last_time = time()
 	tx_found = 0
