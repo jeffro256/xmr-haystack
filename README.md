@@ -1,4 +1,4 @@
-# xmr_haystack
+# xmr-haystack
 
 ## Description
 
