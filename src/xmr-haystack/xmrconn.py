@@ -1,9 +1,97 @@
+from collections import namedtuple
 import json
 import requests
 import subprocess as sp
 import sys
 
 class DaemonConnection(object):
+	class Transaction(namedtuple('Transaction', 'hash height timestamp ins outs')):
+		"""
+		Lightweight class to represent the important information about a monero transaction. Easily
+		serialiable to and from JSON.
+
+		Fields:
+			hash - str, hash of transaction
+			height - int, height of block that contains transaction
+			timestamp - int, UNIX timestamp of block that contains transaction
+			ins - list[int], flat list of all gindexes in all rings of stealth addresses in tx 
+			outs - list[str], list of all output stealth addresses (targets) in transaction
+		"""
+
+		def tojson(self):
+			return json.dumps(self._asdict())
+
+		@classmethod
+		def fromjson(cls, json_data):
+			if type(json_data) is str:
+				json_obj = json.loads(json_data)
+			else:
+				json_obj = json_data
+
+			for attr in cls._fields:
+				if attr not in json_obj:
+					raise ValueError(f'attribute "{attr}" not in json_obj')
+
+			fields = [json_obj[x] for x in cls._fields]
+
+			return cls(*fields)
+
+		@classmethod
+		def all_in_rpc_resp(cls, json_resp):
+			"""
+			Returns a list of Transaction objects respresenting all valid transactions that are
+			contained in a RPC command /get_transactions JSON response. json_resp is just a JSON
+			obj parsed from the text response from the RPC command. It is used in the method
+			DaemonConnection.get_transactions().
+
+			Doc: https://web.getmonero.org/resources/developer-guides/daemon-rpc.html#get_transactions
+			"""
+
+			return [cls._fromrpcobj(x) for x in json_resp['txs']]
+
+		@classmethod
+		def _fromrpcobj(cls, json_data):
+			"""
+			Returns a Transaction object from JSON object inside response of RPC /get_transactions
+			command. json_data is a json obj representation of a tx found at resp["txs"][x], where
+			resp is the json response from monerod and x is an index.
+
+			Doc: https://web.getmonero.org/resources/developer-guides/daemon-rpc.html#get_transactions
+			"""
+
+			tx_hash = json_data['tx_hash']
+			blk_height = json_data['block_height']
+			timestamp = json_data['block_timestamp']
+
+			tx_json = json.loads(json_data['as_json'])
+
+			ins = []
+			outs = []
+
+			# I don't know why this structure is so damn convoluted
+			for in_entry in tx_json['vin']:
+				k = in_entry['key']
+				gindex_offsets = k['key_offsets']
+				gindexes = [sum(gindex_offsets[:i+1]) for i in range(len(gindex_offsets))]
+
+				ins.extend(gindexes)
+
+			for out_entry in tx_json['vout']:
+				key = out_entry['target']['key']
+
+				outs.append(key)
+
+			return cls(tx_hash, blk_height, timestamp, ins, outs)
+
+		def __eq__(self, other):
+			""" Returns True if hashes are equal """
+			return self.hash == other.hash
+
+		def __ne__(self, other):
+			""" Returns True if hashes are not equal """
+
+			return self.hash != other.hash
+
 	def __init__(self, addr='127.0.0.1', port=18081, user=None, pwd=None, scheme='http'):
 		if (user is None) ^ (pwd is None):
 			raise ValueError('user and pwd must both either be set or not set')
@@ -64,7 +152,7 @@ class DaemonConnection(object):
 
 	def get_transactions(self, txids):
 		"""
-		Returns list of transaction objects represented by JSON from get_transactions RPC command
+		Returns list of Transaction objs from get_transactions RPC command
 
 		txids: list of transaction ids/hashes
 		"""
@@ -73,11 +161,11 @@ class DaemonConnection(object):
 		iter(txids)
 
 		url = self.url('/get_transactions')
-		post_data = {'txs_hashes': txids, 'decode_as_json': True}
+		post_data = {'txs_hashes': txids, 'decode_as_json': True, 'prune': True}
 		resp = requests.post(url, json=post_data, auth=self.auth())
 
 		try:
-			transactions = resp.json()
+			resp_json = resp.json()
 		except:
 			print("Error! json decoding from monero daemon. Response shown below:", file=sys.stderr)
 			print(resp.text, file=sys.stderr)
@@ -86,29 +174,20 @@ class DaemonConnection(object):
 			return None
 
 		try:
-			trans_json = list(map(lambda x: json.loads(x['as_json']), transactions['txs']))
+			txs_res = self.Transaction.all_in_rpc_resp(resp_json)
 		except KeyError:
 			print("Error! Node rejected your request because it is too large", file=sys.stderr)
 			return None
 
-		if len(trans_json) != len(txids):
+		if len(txs_res) != len(txids):
 			print("Error! Response length not equal to request length", file=sys.stderr)
 			return None
 
-		return trans_json
+		return txs_res
 
 	def get_outs(self, key_indexes):
 		"""
 		Returns list of output info objects from get_outs RPC command
-
-		key_indexes: list of one-time public key global indexes
-		"""
-
-		return self.get_outs_raw(key_indexes)['outs']
-
-	def get_outs_raw(self, key_indexes):
-		"""
-		Returns raw json response from get_outs RPC command, including responses status, etc
 
 		key_indexes: list of one-time public key global indexes
 		"""
@@ -120,7 +199,7 @@ class DaemonConnection(object):
 		post_data = {'outputs': [{'index': x} for x in key_indexes] }
 		outs = requests.post(url, json=post_data, auth=self.auth()).json()
 
-		return outs
+		return outs['outs']
 
 	def get_block(self, height):
 		"""
@@ -235,3 +314,4 @@ class WalletConnection(object):
 		#     Monero 'Nitrogen Nebula' (v0.16.0.3-release)
 
 		return proc.returncode == 0 and b'Monero' in stdout
+

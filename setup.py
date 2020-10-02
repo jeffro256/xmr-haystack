@@ -44,7 +44,7 @@ setup(
     package_dir={'': 'src'},
     packages=find_packages(where='src'),
     python_requires='>=3.5, <4',
-    install_requires=['cryptography', 'requests'],
+    install_requires=['cryptography', 'requests', 'bidict'],
     #extras_require={  # Optional
     #    'dev': ['check-manifest'],
     #    'test': ['coverage'],

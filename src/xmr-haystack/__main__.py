@@ -1,3 +1,5 @@
+from bidict import bidict
+from datetime import datetime
 import getpass
 import random
 from sys import stdin, stdout, stderr
@@ -35,18 +37,21 @@ def main():
 		print("No transfers to show.", file=stderr)
 		return 0
 
-	pubkey_by_index = {entry['global_index']: entry['pubkey'] for entry in trans_data}
+	pubkey_by_index = bidict({entry['global_index']: entry['pubkey'] for entry in trans_data})
 
 	# If available, use the cache to query already built txs_by_key_index and last scan height. Use this information
 	# to get height to start scan. If cache not available, default to empty txs_by_key_index and restore height minus
 	# some for the start height. We subtract a small amount from the starting height in case of a reorg and to defend
 	# against a malicious node attempting to guess our identity from the restore height. Finally calculate the height
 	# to end our scan on. It will possibly be updated later during our scan.
+	txs_by_key_index = {i: [] for i in pubkey_by_index}
 	should_scan_height = True
 
 	if settings['caching'] and settings['cachein'] is not None:
 		print("Getting scan information from cache...")
-		txs_by_key_index, last_height = get_cached_info(settings['cachein'], pubkey_by_index, password)
+		cached_txs, last_height = get_cached_info(settings['cachein'], pubkey_by_index, password)
+
+		txs_by_key_index.update(cached_txs)
 
 		if last_height is not None:
 			height_offset = random.randint(25, 250)
@@ -63,7 +68,6 @@ def main():
 
 		height_offset = random.randint(25, 250)
 		start_height = max(restore_height - height_offset, 0)
-		txs_by_key_index = {i: [] for i in pubkey_by_index}
 
 	end_height = max(daemon.get_info()['height'] - 1, start_height)
 
@@ -92,28 +96,29 @@ def main():
 					return 1
 
 				# For each transaction in block
-				for i, tx in enumerate(txs):
-					# For each stealth address index in transaction
-					for kindex in get_key_indexes(tx):
+				for tx in txs:
+					# For each input and output stealth address index in transaction
+					out_gindexes = [pubkey_by_index.inverse[p] for p in tx.outs if p in pubkey_by_index.values()]
+					for kindex in (tx.ins + out_gindexes):
 						# If index belongs to us and hasn't been added before
-						if kindex in txs_by_key_index and tx_hashes[i] not in txs_by_key_index[kindex]:
-							txs_by_key_index[kindex].append(tx_hashes[i])
+						if kindex in txs_by_key_index and tx not in txs_by_key_index[kindex]:
+							txs_by_key_index[kindex].append(tx)
 							tx_found += 1
 
-							print("Found tx:", tx_hashes[i])
+							print("Found tx:", tx.hash)
 
 				tx_hashes = tx_hashes[tx_batch_count:]
 
 				# Poll print progress
 				force = height == end_height
 				prog = (height - start_height) / (end_height - start_height) * 100
-				last_time = poll_progress_print(prog_fmt, last_time, force, h=height, e=end_height, 
+				last_time = poll_progress_print(prog_fmt, last_time, force, h=height, e=end_height,
 					p=prog, f=tx_found)
 		print('\nDone!')
 	except KeyboardInterrupt:
 		print("\nCaught keyboard interrupt. Exiting...")
 
-	pretty_print_results(txs_by_key_index, pubkey_by_index)
+	pretty_print_results(txs_by_key_index, pubkey_by_index, trans_data)
 
 	if settings['caching'] and settings['cacheout'] is not None:
 		print("Writing to cache...")
@@ -130,24 +135,6 @@ def main():
 ##### OTHER HELPER FUNCTIONS #####
 ##################################
 
-def get_key_indexes(tx):
-	"""
-	Returns a list of all one-time public key global indexes used in a transaction.
-
-	tx: a dict-like transaction object in form as returned by get_transactions RPC command
-	"""
-
-	kindexes = []
-
-	for tx_input in tx['vin']:
-		key_offsets = tx_input['key']['key_offsets']
-
-		new_indexes = [sum(key_offsets[:i+1]) for i in range(len(key_offsets))]
-
-		kindexes += new_indexes
-
-	return kindexes
-
 def getpassword(prompt='Password: '):
 	""" Returns secure password, read from stdin w/o echoing """
 
@@ -156,11 +143,13 @@ def getpassword(prompt='Password: '):
 	else:
 		return stdin.readline().rstrip()
 
-def pretty_print_results(txs_by_key_index, pubkey_by_index):
+def pretty_print_results(txs_by_key_index, pubkey_by_index, transfer_data):
 	"""
 	Pretty prints the final results of the program
 
 	txs_by_key_index: {int: [str]}, dict of global indexes referencing a list of transactions
+	pubkey_by_index: {int: str}, dict of global indexes referencing their corresponding pubkeys
+	transfer_data: [dict], result of call to WalletConnection.incoming_transfers()
 	"""
 
 	for key_index in txs_by_key_index:
@@ -168,11 +157,26 @@ def pretty_print_results(txs_by_key_index, pubkey_by_index):
 
 		print("Your stealth address:", pubkey)
 
-		used_txids = txs_by_key_index[key_index]
+		txs = txs_by_key_index[key_index]
 
-		if used_txids:
-			for txid in used_txids:
-				print("    tx: ", txid)
+		if txs:
+			for tx in txs:
+				print("    [%s]: " % datetime.fromtimestamp(tx.timestamp), end="")
+
+				# Get the transfer which matches the tx_id in transfer_data or None if not found
+				matching_transfer = ([None] + [e for e in transfer_data if e['tx_id'] == tx.hash])[-1]
+
+				# If this is originating transaction of current pubkey
+				if matching_transfer and matching_transfer['pubkey'] == pubkey:
+					print("Pubkey was created. ", end="")
+				# If you are sender/recipient of transaction but its not originator of current pubkey
+				elif matching_transfer:
+					print("Pubkey was spent. ", end="")
+				# Otherwise its not yours and thus a decoy
+				else:
+					print("Used as a decoy. ", end="")
+
+				print("Transaction(hash=%s, height=%d, ins=%d, outs=%d)" % (tx.hash, tx.height, len(tx.ins), len(tx.outs)))
 		else:
 			print("    * no transactions found *")
 
