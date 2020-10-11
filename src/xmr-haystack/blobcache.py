@@ -2,29 +2,29 @@ import base64
 from cryptography.fernet import Fernet
 import hashlib
 import json
+import os
 
 class BlobCache(object):
-	def __init__(self, blobs = {}):
+	def __init__(self, blobs = {}, salt=None):
 		self.blobs = blobs
+		self.salt = salt if salt else base64.b64encode(os.urandom(32)).decode()
 
 	def save(self, file):
 		contents = {
-			'version': BlobCache.current_version(),
-			'blobs': self.blobs
+			'version': self.current_version(),
+			'blobs': self.blobs,
+			'salt': self.salt
 		}
 
 		file.write(json.dumps(contents))
 
-	def add_obj(self, obj, key):
+	def add_obj(self, obj, passphrase):
+		key = self.gen_key(passphrase)
+
 		f = Fernet(key)
-		key_id = BlobCache.key_id(key)
+		key_id = self.key_id(key)
 
-		blob_structure = {
-			'blob': True,
-			'data': obj
-		}
-
-		blob_json_str = json.dumps(blob_structure)
+		blob_json_str = json.dumps(obj)
 		blob_encrypted = f.encrypt(blob_json_str.encode())
 		blob = base64.b64encode(blob_encrypted).decode()
 
@@ -33,9 +33,10 @@ class BlobCache(object):
 		else:
 			self.blobs[key_id] = [blob]
 
-	def get_objs(self, key):
+	def get_objs(self, passphrase):
+		key = self.gen_key(passphrase)
 		f = Fernet(key)
-		key_id = BlobCache.key_id(key)
+		key_id = self.key_id(key)
 
 		if key_id not in self.blobs:
 			return []
@@ -49,63 +50,62 @@ class BlobCache(object):
 				blob_decrypted = f.decrypt(blob_decoded)
 				blob_contents = json.loads(blob_decrypted.decode())
 
-				if blob_contents['blob'] is not True:
-					continue
-
-				obj = blob_contents['data']
-				objs.append(obj)
+				objs.append(blob_contents)
 			except:
 				pass
 
 		return objs
 
-	def clear_objs(self, key):
-		key_id = BlobCache.key_id(key)
+	def clear_objs(self, passphrase):
+		key = self.gen_key(passphrase)
+		key_id = self.key_id(key)
 
 		if key_id in self.blobs:
 			self.blobs.pop(key_id, None)
 
-	def pop_objs(self, key):
+	def pop_objs(self, passphrase):
+		key = self.gen_key(passphrase)
 		objs = self.get_objs(key)
 		self.clear_objs(key)
 
 		return objs
 
+	def gen_key(self, seed):
+		if not seed:
+			raise ValueError('key seed must not be falsey')
+		elif type(seed) != bytes:
+			seed = str(seed).encode()
+
+		h = hashlib.sha256()
+		h.update(seed)
+		h.update(self.salt.encode())
+		key = base64.b64encode(h.digest())
+
+		return key
+
 	@classmethod
 	def load(cls, file):
 		contents = json.loads(file.read())
 
-		if 'version' not in contents or 'blobs' not in contents:
+		if 'version' not in contents or 'blobs' not in contents or 'salt' not in contents:
 			raise ValueError('Incorrect JSON for ScanCache')
 		elif contents['version'] != cls.current_version():
 			raise ValueError('Incorrect ScanCache version')
 
 		blobs = contents['blobs']
+		salt = contents['salt']
 
-		return BlobCache(blobs)
-
-	@classmethod
-	def gen_key(cls, seed):
-		if not seed:
-			raise ValueError('key seed must not be falsey')
-		elif type(seed) == str:
-			seed = seed.encode()
-
-		h = hashlib.sha256()
-		h.update(seed)
-		b = base64.b64encode(h.digest())
-		key = b[:44]
-
-		return key
+		return cls(blobs, salt)
 
 	@classmethod
 	def key_id(cls, key):
 		h = hashlib.sha256()
 		h.update(key)
-		id = base64.b64encode(h.digest()).decode()
+		kid = base64.b64encode(h.digest()).decode()
 
-		return id
+		return kid
 
 	@classmethod
 	def current_version(cls):
 		return 'sc1'
+

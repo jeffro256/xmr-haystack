@@ -14,27 +14,13 @@ class DaemonConnection(object):
 			hash - str, hash of transaction
 			height - int, height of block that contains transaction
 			timestamp - int, UNIX timestamp of block that contains transaction
-			ins - list[int], flat list of all gindexes in all rings of stealth addresses in tx 
+			ins - list[int], flat list of all gindexes in all rings of stealth addresses in tx
 			outs - list[str], list of all output stealth addresses (targets) in transaction
 		"""
 
-		def tojson(self):
-			return json.dumps(self._asdict())
-
 		@classmethod
 		def fromjson(cls, json_data):
-			if type(json_data) is str:
-				json_obj = json.loads(json_data)
-			else:
-				json_obj = json_data
-
-			for attr in cls._fields:
-				if attr not in json_obj:
-					raise ValueError(f'attribute "{attr}" not in json_obj')
-
-			fields = [json_obj[x] for x in cls._fields]
-
-			return cls(*fields)
+			return cls(*json_data)
 
 		@classmethod
 		def all_in_rpc_resp(cls, json_resp):
