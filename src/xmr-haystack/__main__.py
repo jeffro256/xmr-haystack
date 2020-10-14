@@ -9,6 +9,7 @@ from time import time
 from .blobcache import BlobCache
 from . import handlearg
 from . import xmrconn
+from .xmrtype import Block, Transaction
 
 def main():
 	arg_parser = handlearg.get_parser()
@@ -97,17 +98,6 @@ def main():
 ##################################
 ##### OTHER HELPER FUNCTIONS #####
 ##################################
-
-class Block(namedtuple('Block', 'height hash')):
-	@classmethod
-	def fromjson(cls, obj):
-		return cls(*obj)
-
-	def __eq__(self, other):
-		return self.hash == other.hash
-
-	def __ne__(self, other):
-		return self.hash != other.hash
 
 def scan(start_height, end_height, daemon, settings, pubkey_by_gindex, txs_by_key_index, scanned_blocks):
 	# Loop through all transactions in all blocks in [start_height, end_height],
@@ -246,8 +236,7 @@ def get_cached_info(blob_cache, password):
 		return {}, []
 
 	cached_obj = cached_objs[0]
-	Tx = xmrconn.DaemonConnection.Transaction # For readability of next line
-	txs = {int(i): list(map(Tx.fromjson, txs)) for i, txs in cached_obj['txs'].items()}
+	txs = {int(i): list(map(Transaction.fromjson, txs)) for i, txs in cached_obj['txs'].items()}
 	scanned_blocks = list(map(Block.fromjson, cached_obj['scanned_blocks']))
 
 	return txs, scanned_blocks
