@@ -6,12 +6,9 @@ here = pathlib.Path(__file__).parent.resolve()
 # Get the long description from the README file
 long_description = (here / 'README.md').read_text(encoding='utf-8')
 
-# Arguments marked as "Required" below must be included for upload to PyPI.
-# Fields marked as "Optional" may be commented out.
-
 setup(
     name='xmr-haystack',
-    version='0.0.1',
+    version='0.0.3',
     description='Manage your on-chain Monero privacy with xmr-haystack',
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -45,9 +42,9 @@ setup(
     ],
     keywords='monero, blockchain, wallet, privacy, finance',
     package_dir={'': 'src'},
-    packages=find_packages(where='src'),  # Required
+    packages=find_packages(where='src'),
     python_requires='>=3.5, <4',
-    install_requires=['cryptography', 'requests'],  # Optional
+    install_requires=['cryptography', 'requests', 'bidict'],
     #extras_require={  # Optional
     #    'dev': ['check-manifest'],
     #    'test': ['coverage'],
