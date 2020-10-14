@@ -85,10 +85,15 @@ def main():
 
 	if settings['caching'] and settings['cacheout'] is not None:
 		print("Writing to cache...")
+
 		cache = settings['cachein'] if settings['cachein'] is not None else BlobCache()
 		add_to_cache(cache, txs_by_key_index, scanned_blocks, password)
-		cache.save(settings['cacheout'])
-		settings['cacheout'].close()
+
+		cache_out_file = settings['cacheout']
+		cache_out_file.seek(0)
+		cache_out_file.truncate()
+		cache.save(cache_out_file)
+		cache_out_file.close()
 
 	# We made it this far, yay!
 	print("Goodbye!")
