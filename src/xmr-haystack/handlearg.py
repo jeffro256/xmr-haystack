@@ -191,8 +191,6 @@ def validate_and_process(ns, wallet_pass=None):
 			if cache_in_file is not None:
 				# If file has already been read as cache input, and output is same file, clear then assign
 				# cachin to cacheout
-				cache_in_file.seek(0)
-				cache_in_file.truncate()
 				settings['cacheout'] = cache_in_file
 			else:
 				try:
