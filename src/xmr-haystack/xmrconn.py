@@ -1,4 +1,3 @@
-from collections import namedtuple
 import json
 import requests
 import subprocess as sp

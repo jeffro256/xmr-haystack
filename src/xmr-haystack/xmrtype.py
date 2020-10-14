@@ -1,3 +1,6 @@
+from collections import namedtuple
+import json
+
 class Block(namedtuple('Block', 'height hash')):
 	@classmethod
 	def fromjson(cls, obj):

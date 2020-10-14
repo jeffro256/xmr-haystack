@@ -1,5 +1,4 @@
 from bidict import bidict
-from collections import namedtuple
 from datetime import datetime
 import getpass
 import random
