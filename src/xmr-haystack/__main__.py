@@ -76,7 +76,6 @@ def main():
 	try:
 		scanned_blocks = []
 		scan(start_height, end_height, daemon, settings, pubkey_by_index, txs_by_key_index, scanned_blocks)
-		min_height = min([block.height for block in scanned_blocks])
 
 		print('\nDone!')
 	except KeyboardInterrupt:
