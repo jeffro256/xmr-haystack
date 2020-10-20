@@ -11,6 +11,7 @@ from . import xmrconn
 from .xmrtype import Block, Transaction
 
 def main():
+	# Good morning, time to handle arguments
 	arg_parser = handlearg.get_parser()
 	args = arg_parser.parse_args()
 
@@ -40,41 +41,53 @@ def main():
 
 	pubkey_by_index = bidict({entry['global_index']: entry['pubkey'] for entry in trans_data})
 
-	# If available, use the cache to query already built txs_by_key_index and last scan height. Use this information
-	# to get height to start scan. If cache not available, default to empty txs_by_key_index and restore height minus
-	# some for the start height. We subtract a small amount from the starting height in case of a reorg and to defend
-	# against a malicious node attempting to guess our identity from the restore height. Finally calculate the height
-	# to end our scan on. It will possibly be updated later during our scan.
+	# If available, use the cache to query already built txs_by_key_index and scanned_blocks.
 	txs_by_key_index = {i: [] for i in pubkey_by_index}
-	should_scan_height = True
+	scanned_blocks = []
 
-	if settings['caching'] and settings['cachein'] is not None:
+	should_read_cache = settings['cachein'] is not None
+	if should_read_cache:
 		print("Getting scan information from cache...")
 		cached_txs, scanned_blocks = get_cached_info(settings['cachein'], password)
 
 		txs_by_key_index.update(cached_txs)
 
-		if scanned_blocks is not None:
-			min_height = min([block.height for block in scanned_blocks])
-			height_offset = random.randint(25, 250)
-			start_height = max(min_height - height_offset, 0)
-			should_scan_height = False
+	# Calculate the start height. If specified on the command line, use that height. If not, try to use
+	# scanned_blocks from cache to find newest valid block and start from a little before there. If that
+	# doesn't work, then ask the wallet for its restore height and start from a little before there. If
+	# all else fails, resort to scanning from beginning of the blockchain. After all that, calculate the
+	# height to end the scan.
+	if settings['height'] is not None:
+		start_height = settings['height']
+		scanned_blocks = []
+	else:
+		need_restore_height = True
 
-	if should_scan_height:
-		print("Getting restore height from wallet...")
-		restore_height = wallet.get_restore_height()
+		if scanned_blocks:
+			newest_valid = newest_block(scanned_blocks, daemon)
+			if newest_valid:
+				scanned_blocks = [newest_valid]
+				height_offset = random.randint(25, 250)
+				start_height = max(newest_valid.height - height_offset, 0)
+				need_restore_height = False
+			else:
+				scanned_blocks = []
 
-		if restore_height is None:
-			print("bad output from wallet command", file=stderr)
-			return -1
+		if need_restore_height:
+			print("Getting restore height from wallet...")
+			restore_height = wallet.get_restore_height()
 
-		height_offset = random.randint(25, 250)
-		start_height = max(restore_height - height_offset, 0)
+			if restore_height is None:
+				print("Warning: couldn't get restore height from wallet!! Scanning whole blockchain...")
+				start_height = 0
+			else:
+				height_offset = random.randint(25, 250)
+				start_height = max(restore_height - height_offset, 0)
 
 	end_height = max(daemon.get_info()['height'] - 1, start_height)
 
+	# Now it's time to scan!
 	try:
-		scanned_blocks = []
 		scan(start_height, end_height, daemon, settings, pubkey_by_index, txs_by_key_index, scanned_blocks)
 
 		print('\nDone!')
@@ -83,7 +96,8 @@ def main():
 
 	pretty_print_results(txs_by_key_index, pubkey_by_index, trans_data)
 
-	if settings['caching'] and settings['cacheout'] is not None:
+	# Write txs_by_index and scanned_blocks to output cache
+	if settings['cacheout'] is not None:
 		print("Writing to cache...")
 
 		cache = settings['cachein'] if settings['cachein'] is not None else BlobCache()
@@ -118,11 +132,18 @@ def scan(start_height, end_height, daemon, settings, pubkey_by_gindex, txs_by_ke
 		block = daemon.get_block(height)
 		block_header = block['block_header']
 
-		# If the new block doesn't point to the last block's hash
-		if len(scanned_blocks) != 0 and block_header['prev_hash'] != scanned_blocks[-1].hash:
-			print("Reorg detected. Rolling back...")
+		# If the new block doesn't point to the last block's hash and not a 'decoy scan'. (i.e. when
+		# start_height <= height <= scanned_blocks[0].height
+		decoy_scan = scanned_blocks and height <= scanned_blocks[0].height
+		mismatched_hash = len(scanned_blocks) != 0 and block_header['prev_hash'] != scanned_blocks[-1].hash
+		if mismatched_hash and not decoy_scan:
+			print("\nReorg detected. Rolling back...")
 			scanned_blocks.pop()
 			height -= 1
+
+			if not scanned_blocks:
+				print("Warning! Rolled back all available scanned blocks. Something might be wrong.")
+
 			continue
 
 		# For some reason, the node returns an object w/o a 'tx_hashes' key if there are none
@@ -142,12 +163,18 @@ def scan(start_height, end_height, daemon, settings, pubkey_by_gindex, txs_by_ke
 				# For each input and output stealth address index in transaction
 				out_gindexes = [pubkey_by_gindex.inverse[p] for p in tx.outs if p in pubkey_by_gindex.values()]
 				for kindex in (tx.ins + out_gindexes):
-					# If index belongs to us and hasn't been added before
-					if kindex in txs_by_key_index and tx not in txs_by_key_index[kindex]:
-						txs_by_key_index[kindex].append(tx)
-						tx_found += 1
+					# If index belongs to us
+					if kindex in txs_by_key_index:
+						# If new tx
+						if tx not in txs_by_key_index[kindex]:
+							txs_by_key_index[kindex].append(tx)
+							print("Found tx:", tx.hash)
+						# If tx already found, replace with newest version. Useful in case of reorg since
+						# last scan
+						else:
+							txs_by_key_index = [(x if x != tx else tx) for x in txs_by_key_index[kindex]]
 
-						print("Found tx:", tx.hash)
+						tx_found += 1
 
 			tx_hashes = tx_hashes[tx_batch_count:]
 
@@ -252,8 +279,12 @@ def newest_block(blocks, daemon):
 
 	sorted_blocks = sorted(blocks, key=lambda x: x.height, reverse=True)
 
-	for block in sorted_blocks:
-		pass
+	for cached_block in sorted_blocks:
+		network_block = daemon.get_block(cached_block.height)
+
+		# If found a match
+		if 'block_header' in network_block and network_block['block_header']['hash'] == cached_block.hash:
+			return cached_block
 
 # Program entry point
 if __name__ == '__main__':

@@ -52,7 +52,7 @@ def validate_and_process(ns, wallet_pass=None):
 	Checks the arguments in namespace for any conditions not handled by get_parser
 
 	Raises a ValueError if there is a unfixable problem with the arguments. Attempts to fix
-	problems where it can and inserts defaults where argparse fell short. Wallet password 
+	problems where it can and inserts defaults where argparse fell short. Wallet password
 	is not in ns because the wallet password shouldn't be passed on the command-line.
 
 	ns: Namespace object returned by argparse.ArgumentParser.parse_args
