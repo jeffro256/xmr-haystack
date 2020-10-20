@@ -98,19 +98,21 @@ def main():
 
 	# Write txs_by_index and scanned_blocks to output cache
 	if settings['cacheout'] is not None:
-		print("Writing to cache...")
-
 		cache = settings['cachein'] if settings['cachein'] is not None else BlobCache()
 		add_to_cache(cache, txs_by_key_index, scanned_blocks, password)
 
-		cache_out_file = settings['cacheout']
-		cache_out_file.seek(0)
-		cache_out_file.truncate()
-		cache.save(cache_out_file)
-		cache_out_file.close()
+		try:
+			cache_out_file = settings['cacheout']
+			cache_out_file.seek(0)
+			cache_out_file.truncate()
+			cache.save(cache_out_file)
+			cache_out_file.close()
+		except Exception as e:
+			print(e)
+			print("Error: writing to cache failed.")
+			return 1
 
 	# We made it this far, yay!
-	print("Goodbye!")
 	return 0
 
 ##################################
@@ -204,6 +206,8 @@ def pretty_print_results(txs_by_key_index, pubkey_by_index, transfer_data):
 	pubkey_by_index: {int: str}, dict of global indexes referencing their corresponding pubkeys
 	transfer_data: [dict], result of call to WalletConnection.incoming_transfers()
 	"""
+
+	print()
 
 	for key_index in txs_by_key_index:
 		pubkey = pubkey_by_index[key_index]
