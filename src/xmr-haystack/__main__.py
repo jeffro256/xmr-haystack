@@ -32,7 +32,7 @@ def main():
 	# Ask wallet for table of transfer information. The password is passed through stdin. Output from stdout
 	# is stored in variable res. Construct a dictionary 'pubkey_by_index' where the keys are the global indexes
 	# of your own one-time pubkeys and the values are the pubkeys
-	print("Getting keys from wallet...")
+	if not settings['quiet']: print("Getting keys from wallet...")
 	trans_data = wallet.get_incoming_transfers()
 
 	if not trans_data:
@@ -47,7 +47,7 @@ def main():
 
 	should_read_cache = settings['cachein'] is not None
 	if should_read_cache:
-		print("Getting scan information from cache...")
+		if not settings['quiet']: print("Getting scan information from cache...")
 		cached_txs, scanned_blocks = get_cached_info(settings['cachein'], password)
 
 		txs_by_key_index.update(cached_txs)
@@ -74,7 +74,7 @@ def main():
 				scanned_blocks = []
 
 		if need_restore_height:
-			print("Getting restore height from wallet...")
+			if not settings['quiet']: print("Getting restore height from wallet...")
 			restore_height = wallet.get_restore_height()
 
 			if restore_height is None:
@@ -90,27 +90,29 @@ def main():
 	try:
 		scan(start_height, end_height, daemon, settings, pubkey_by_index, txs_by_key_index, scanned_blocks)
 
-		print('\nDone!')
+		if not settings['quiet']: print('\nDone!')
 	except KeyboardInterrupt:
 		print("\nCaught keyboard interrupt. Exiting...")
 
-	pretty_print_results(txs_by_key_index, pubkey_by_index, trans_data)
+	pretty_print_results(txs_by_key_index, pubkey_by_index, trans_data, extra_quiet=settings['vquiet'])
 
 	# Write txs_by_index and scanned_blocks to output cache
 	if settings['cacheout'] is not None:
-		print("Writing to cache...")
-
 		cache = settings['cachein'] if settings['cachein'] is not None else BlobCache()
 		add_to_cache(cache, txs_by_key_index, scanned_blocks, password)
 
-		cache_out_file = settings['cacheout']
-		cache_out_file.seek(0)
-		cache_out_file.truncate()
-		cache.save(cache_out_file)
-		cache_out_file.close()
+		try:
+			cache_out_file = settings['cacheout']
+			cache_out_file.seek(0)
+			cache_out_file.truncate()
+			cache.save(cache_out_file)
+			cache_out_file.close()
+		except Exception as e:
+			print(e)
+			print("Error: writing to cache failed.")
+			return 1
 
 	# We made it this far, yay!
-	print("Goodbye!")
 	return 0
 
 ##################################
@@ -168,7 +170,7 @@ def scan(start_height, end_height, daemon, settings, pubkey_by_gindex, txs_by_ke
 						# If new tx
 						if tx not in txs_by_key_index[kindex]:
 							txs_by_key_index[kindex].append(tx)
-							print("Found tx:", tx.hash)
+							if not settings['quiet']: print("Found tx:", tx.hash)
 						# If tx already found, replace with newest version. Useful in case of reorg since
 						# last scan
 						else:
@@ -179,10 +181,11 @@ def scan(start_height, end_height, daemon, settings, pubkey_by_gindex, txs_by_ke
 			tx_hashes = tx_hashes[tx_batch_count:]
 
 			# Poll print progress
-			force = height == end_height
-			prog = (height - start_height) / (end_height - start_height) * 100
-			last_time = poll_progress_print(prog_fmt, last_time, force=force, h=height, e=end_height,
-				p=prog, f=tx_found)
+			if not settings['vquiet']:
+				force = height == end_height
+				prog = (height - start_height) / (end_height - start_height) * 100
+				last_time = poll_progress_print(prog_fmt, last_time, force=force, h=height, e=end_height,
+					p=prog, f=tx_found)
 
 		scanned_blocks.append(Block(block_header['height'], block_header['hash']))
 		scanned_blocks[:] = scanned_blocks[-max_scanned_blocks:]
@@ -196,7 +199,7 @@ def getpassword(prompt='Password: '):
 	else:
 		return stdin.readline().rstrip()
 
-def pretty_print_results(txs_by_key_index, pubkey_by_index, transfer_data):
+def pretty_print_results(txs_by_key_index, pubkey_by_index, transfer_data, extra_quiet=False):
 	"""
 	Pretty prints the final results of the program
 
@@ -204,6 +207,8 @@ def pretty_print_results(txs_by_key_index, pubkey_by_index, transfer_data):
 	pubkey_by_index: {int: str}, dict of global indexes referencing their corresponding pubkeys
 	transfer_data: [dict], result of call to WalletConnection.incoming_transfers()
 	"""
+
+	print()
 
 	for key_index in txs_by_key_index:
 		pubkey = pubkey_by_index[key_index]
@@ -229,7 +234,11 @@ def pretty_print_results(txs_by_key_index, pubkey_by_index, transfer_data):
 				else:
 					print("Used as a decoy. ", end="")
 
-				print("Transaction(hash=%s, height=%d, ins=%d, outs=%d)" % (tx.hash, tx.height, len(tx.ins), len(tx.outs)))
+				if not extra_quiet:
+					tx_fmt = "Transaction(hash=%s, height=%d, ins=%d, outs=%d)"
+					print(tx_fmt % (tx.hash, tx.height, len(tx.ins), len(tx.outs)), end="")
+
+				print()
 		else:
 			print("    * no transactions found *")
 
