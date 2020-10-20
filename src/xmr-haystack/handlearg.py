@@ -29,6 +29,13 @@ def get_parser():
 		help='rescan blockchain from specified height. defaults to wallet restore height',
 		type=int,
 		dest='height')
+	quietgrp = parser.add_mutually_exclusive_group()
+	quietgrp.add_argument('-q', '--quiet',
+		help='use this flag if you would like a simpler output',
+		action='store_true')
+	quietgrp.add_argument('-Q', '--extra-quiet',
+		help='use this flag if you would like a BARE BONES output',
+		action='store_true')
 	parser.add_argument('-i', '--cache-input',
 		help='path to input cache file',
 		type=argparse.FileType('r+'),
@@ -67,6 +74,8 @@ def validate_and_process(ns, wallet_pass=None):
 		'duser' -> str, valid daemon username. None if daemon_login == False
 		'dpass' -> str, valid daemon password. None if daemon_login == False
 		'restricted' -> bool, True if only restricted RPC is enabled
+		'quiet' -> Bool, True if --quiet or --extra-quiet was specified
+		'vquiet' -> Bool, True if --extra-quiet was specified
 		'caching' -> bool, True if program should cache, False only if explicitly specified
 		'cachein' -> BlobCache, cache object at --cache-input file. None if not caching or unable to load cache
 		'cacheout' -> open() file, writable file at --cache-output. None if not caching
@@ -78,6 +87,10 @@ def validate_and_process(ns, wallet_pass=None):
 	default_cache_path = os.path.join(cache_base, 'xmrhaystack.json')
 
 	settings['walletf'] = getattr(ns, 'wallet file')
+
+	# Set quiet settings
+	settings['quiet'] = ns.quiet or ns.extra_quiet
+	settings['vquiet'] = ns.extra_quiet
 
 	# Check scan height
 	settings['height'] = ns.height
@@ -103,7 +116,7 @@ def validate_and_process(ns, wallet_pass=None):
 	# Check daemon address + port + login
 	conn = xmrconn.DaemonConnection(ns.addr, ns.port, settings['duser'], settings['dpass'])
 
-	print("Checking daemon access...")
+	if not settings['quiet']: print("Checking daemon access...")
 	try:
 		info = conn.get_info()
 	except:
@@ -118,7 +131,7 @@ def validate_and_process(ns, wallet_pass=None):
 
 	# sync_info is a command only allowed in unrestricted RPC mode. If it isn't enabled, there's a
 	# good chance that the daemon will reject large get_transactions requests. Warn the user of this
-	print("Checking restricted RPC command access...")
+	if not settings['quiet']: print("Checking restricted RPC command access...")
 
 	try:
 		sync_info = conn.sync_info()
@@ -129,7 +142,8 @@ def validate_and_process(ns, wallet_pass=None):
 	# If in unrestricted mode then resp['result']['status'] == 'OK'
 	settings['restricted'] = sync_info is None
 	if settings['restricted']:
-		print("Warning: daemon is in restricted RPC mode. Some functionality may not be available")
+		if not settings['vquiet']:
+			print("Warning: daemon is in restricted RPC mode. Some functionality may not be available")
 
 	# Check monero-wallet-cli
 	settings['wallcmd'] = ns.cli_exe_file.name if ns.cli_exe_file else 'monero-wallet-cli'
@@ -140,7 +154,7 @@ def validate_and_process(ns, wallet_pass=None):
 
 	# Check wallet login if password is supplied
 	if wallet_pass is not None:
-		print("Checking wallet login...")
+		if not settings['quiet']: print("Checking wallet login...")
 		wallet = xmrconn.WalletConnection(settings['walletf'], wallet_pass, conn.host(), ns.login, cmd=settings['wallcmd'])
 
 		if not wallet.is_valid():
