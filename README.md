@@ -33,8 +33,8 @@ If you are Windows and would prefer to build from the source code, then follow t
 ## Usage
 
 ```
-python3 -m xmr-haystack [-h] [-a ADDR] [-p PORT] [-l LOGIN] [-s HEIGHT] [-i CACHE_IN]
-[-o CACHE_OUT] [-n] [-c CLI_EXE_FILE] wallet file
+python3 -m xmr-haystack [-h] [-a ADDR] [-p PORT] [-l LOGIN] [-s HEIGHT] [-q | -Q] [-i CACHE_IN] [-o CACHE_OUT] [-n] 
+                        [-c CLI_EXE_FILE] wallet file
 
 America's favorite stealth address scanner™
 
@@ -51,6 +51,8 @@ optional arguments:
                         monerod RPC login in the form of [username]:[password]
   -s HEIGHT, --scan-height HEIGHT
                         rescan blockchain from specified height. defaults to wallet restore height
+  -q, --quiet           use this flag if you would like a simpler output
+  -Q, --extra-quiet     use this flag if you would like a BARE BONES output
   -i CACHE_IN, --cache-input CACHE_IN
                         path to input cache file
   -o CACHE_OUT, --cache-output CACHE_OUT
