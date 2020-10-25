@@ -30,7 +30,7 @@ def main():
 	wallet = xmrconn.WalletConnection(settings['walletf'], password, daemon.host(), daemon_login, cmd=settings['wallcmd'])
 
 	# Ask wallet for table of transfer information. The password is passed through stdin. Output from stdout
-	# is stored in variable res. Construct a dictionary 'pubkey_by_index' where the keys are the global indexes
+	# is stored in variable res. Construct a dictionary 'pubkey_by_gindex' where the keys are the global indexes
 	# of your own one-time pubkeys and the values are the pubkeys
 	if not settings['quiet']: print("Getting keys from wallet...")
 	trans_data = wallet.get_incoming_transfers()
@@ -39,10 +39,10 @@ def main():
 		print("No transfers to show.", file=stderr)
 		return 0
 
-	pubkey_by_index = bidict({entry['global_index']: entry['pubkey'] for entry in trans_data})
+	pubkey_by_gindex = bidict({entry['global_index']: entry['pubkey'] for entry in trans_data})
 
-	# If available, use the cache to query already built txs_by_key_index and scanned_blocks.
-	txs_by_key_index = {i: [] for i in pubkey_by_index}
+	# If available, use the cache to query already built txs_by_gindex and scanned_blocks.
+	txs_by_gindex = {i: [] for i in pubkey_by_gindex}
 	scanned_blocks = []
 
 	should_read_cache = settings['cachein'] is not None
@@ -50,7 +50,7 @@ def main():
 		if not settings['quiet']: print("Getting scan information from cache...")
 		cached_txs, scanned_blocks = get_cached_info(settings['cachein'], password)
 
-		txs_by_key_index.update(cached_txs)
+		txs_by_gindex.update(cached_txs)
 
 	# Calculate the start height. If specified on the command line, use that height. If not, try to use
 	# scanned_blocks from cache to find newest valid block and start from a little before there. If that
@@ -88,18 +88,18 @@ def main():
 
 	# Now it's time to scan!
 	try:
-		scan(start_height, end_height, daemon, settings, pubkey_by_index, txs_by_key_index, scanned_blocks)
+		scan(start_height, end_height, daemon, settings, pubkey_by_gindex, txs_by_gindex, scanned_blocks)
 
 		if not settings['quiet']: print('\nDone!')
 	except KeyboardInterrupt:
 		print("\nCaught keyboard interrupt. Exiting...")
 
-	pretty_print_results(txs_by_key_index, pubkey_by_index, trans_data, extra_quiet=settings['vquiet'])
+	pretty_print_results(txs_by_gindex, pubkey_by_gindex, trans_data, extra_quiet=settings['vquiet'])
 
-	# Write txs_by_index and scanned_blocks to output cache
+	# Write txs_by_gindex and scanned_blocks to output cache
 	if settings['cacheout'] is not None:
 		cache = settings['cachein'] if settings['cachein'] is not None else BlobCache()
-		add_to_cache(cache, txs_by_key_index, scanned_blocks, password)
+		add_to_cache(cache, txs_by_gindex, scanned_blocks, password)
 
 		try:
 			cache_out_file = settings['cacheout']
@@ -119,9 +119,9 @@ def main():
 ##### OTHER HELPER FUNCTIONS #####
 ##################################
 
-def scan(start_height, end_height, daemon, settings, pubkey_by_gindex, txs_by_key_index, scanned_blocks):
+def scan(start_height, end_height, daemon, settings, pubkey_by_gindex, txs_by_gindex, scanned_blocks):
 	# Loop through all transactions in all blocks in [start_height, end_height],
-	# adding txs to txs_by_key_index if tx contains a public key that belongs to us
+	# adding txs to txs_by_gindex if tx contains a public key that belongs to us
 	tx_batch_count = 100 if settings['restricted'] else 10000
 	tx_hashes = []
 	last_time = time()
@@ -166,15 +166,15 @@ def scan(start_height, end_height, daemon, settings, pubkey_by_gindex, txs_by_ke
 				out_gindexes = [pubkey_by_gindex.inverse[p] for p in tx.outs if p in pubkey_by_gindex.values()]
 				for kindex in (tx.ins + out_gindexes):
 					# If index belongs to us
-					if kindex in txs_by_key_index:
+					if kindex in txs_by_gindex:
 						# If new tx
-						if tx not in txs_by_key_index[kindex]:
-							txs_by_key_index[kindex].append(tx)
+						if tx not in txs_by_gindex[kindex]:
+							txs_by_gindex[kindex].append(tx)
 							if not settings['quiet']: print("Found tx:", tx.hash)
 						# If tx already found, replace with newest version. Useful in case of reorg since
 						# last scan
 						else:
-							txs_by_key_index = [(x if x != tx else tx) for x in txs_by_key_index[kindex]]
+							txs_by_gindex = [(x if x != tx else tx) for x in txs_by_gindex[kindex]]
 
 						tx_found += 1
 
@@ -199,23 +199,23 @@ def getpassword(prompt='Password: '):
 	else:
 		return stdin.readline().rstrip()
 
-def pretty_print_results(txs_by_key_index, pubkey_by_index, transfer_data, extra_quiet=False):
+def pretty_print_results(txs_by_gindex, pubkey_by_gindex, transfer_data, extra_quiet=False):
 	"""
 	Pretty prints the final results of the program
 
-	txs_by_key_index: {int: [str]}, dict of global indexes referencing a list of transactions
-	pubkey_by_index: {int: str}, dict of global indexes referencing their corresponding pubkeys
+	txs_by_gindex: {int: [str]}, dict of global indexes referencing a list of transactions
+	pubkey_by_gindex: {int: str}, dict of global indexes referencing their corresponding pubkeys
 	transfer_data: [dict], result of call to WalletConnection.incoming_transfers()
 	"""
 
 	print()
 
-	for key_index in txs_by_key_index:
-		pubkey = pubkey_by_index[key_index]
+	for key_index in txs_by_gindex:
+		pubkey = pubkey_by_gindex[key_index]
 
 		print("Your stealth address:", pubkey)
 
-		txs = txs_by_key_index[key_index]
+		txs = txs_by_gindex[key_index]
 
 		if txs:
 			for tx in txs:
@@ -253,7 +253,7 @@ def poll_progress_print(fmt_str, last_time, delay=1, force=False, **fmtargs):
 	else:
 		return last_time
 
-def add_to_cache(blob_cache, txs_by_key_index, scanned_blocks, password):
+def add_to_cache(blob_cache, txs_by_gindex, scanned_blocks, password):
 	"""
 	Add data to blob_cache in the structure below:
 
@@ -293,7 +293,7 @@ def add_to_cache(blob_cache, txs_by_key_index, scanned_blocks, password):
 
 	cache_data = {
 		'scanned_blocks':, scanned_blocks
-		'txs': txs_by_key_index,
+		'txs': txs_by_gindex,
 	}
 
 	blob_cache.clear_objs(password)

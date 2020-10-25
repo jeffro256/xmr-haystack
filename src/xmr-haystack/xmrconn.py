@@ -99,18 +99,18 @@ class DaemonConnection(object):
 
 		return txs_res
 
-	def get_outs(self, key_indexes):
+	def get_outs(self, gindexes):
 		"""
 		Returns list of output info objects from get_outs RPC command
 
-		key_indexes: list of one-time public key global indexes
+		gindexes: list of one-time public key global indexes
 		"""
 
 		# Should throw error if not iterable
-		iter(key_indexes)
+		iter(gindexes)
 
 		url = self.url('/get_outs')
-		post_data = {'outputs': [{'index': x} for x in key_indexes] }
+		post_data = {'outputs': [{'index': x} for x in gindexes] }
 		outs = requests.post(url, json=post_data, auth=self.auth()).json()
 
 		return outs['outs']
