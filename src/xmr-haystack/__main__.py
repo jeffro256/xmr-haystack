@@ -122,7 +122,7 @@ def main():
 def scan(start_height, end_height, daemon, settings, pubkey_by_gindex, txs_by_gindex, scanned_blocks):
 	# Loop through all transactions in all blocks in [start_height, end_height],
 	# adding txs to txs_by_gindex if tx contains a public key that belongs to us
-	tx_batch_count = 100 if settings['restricted'] else 10000
+	tx_batch_count = 100 if settings['restricted'] else 1000
 	tx_hashes = []
 	last_time = time()
 	tx_found = 0
@@ -292,7 +292,7 @@ def add_to_cache(blob_cache, txs_by_gindex, scanned_blocks, password):
 	"""
 
 	cache_data = {
-		'scanned_blocks':, scanned_blocks
+		'scanned_blocks': scanned_blocks,
 		'txs': txs_by_gindex,
 	}
 
