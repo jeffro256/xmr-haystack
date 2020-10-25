@@ -255,15 +255,45 @@ def poll_progress_print(fmt_str, last_time, delay=1, force=False, **fmtargs):
 
 def add_to_cache(blob_cache, txs_by_key_index, scanned_blocks, password):
 	"""
-	password ->
-		txs_by_gindex
-		recent block hashes/heights
-		minimum height of blocks in block_hashes
+	Add data to blob_cache in the structure below:
+
+	password -> {
+		scanned_blocks -> [
+			(hash, height)
+			...
+		]
+		wallet_outs -> {
+			primary address -> ]
+				gindexes
+				...
+			[
+		}
+		loose_outs -> [
+			gindexes
+			...
+		]
+		txs_by_gindex -> {
+			gindex -> [
+				txid
+				...
+			]
+			...
+		}
+		pubkey_by_gindex -> {
+			gindex -> pubkey
+			...
+		}
+		wallet_files -> [
+			path
+
+			...
+		]
+	}
 	"""
 
 	cache_data = {
+		'scanned_blocks':, scanned_blocks
 		'txs': txs_by_key_index,
-		'scanned_blocks': scanned_blocks
 	}
 
 	blob_cache.clear_objs(password)
