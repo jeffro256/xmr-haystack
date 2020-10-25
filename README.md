@@ -86,8 +86,3 @@ Your stealth address: 58ddd530a2148ca67f914823bab3e5b30f10be16b5a17ca194a022e279
 While this program works, it is still in *very* early dev stages. Use this program at your own risk;
 I take no responsibility for any lost funds or privacy, etc, etc. That said, I really hope you find
 this code useful and I would really appreciate any feedback. :)
-
-## Donate
-
-89tQx7bUmQDMdkgUjk5ZSfVpV3yGKZ6udWe4XGbBNE27iyxoYoWif8nHCLnvqjodaLENVGgBpWSFE2XGyjNKLT1bB8efQh5
-
