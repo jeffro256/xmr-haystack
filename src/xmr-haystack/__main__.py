@@ -293,7 +293,11 @@ def add_to_cache(blob_cache, txs_by_gindex, scanned_blocks, password):
 
 	cache_data = {
 		'scanned_blocks': scanned_blocks,
+		'wallet_outs': None,
+		'loose_outs': None,
 		'txs': txs_by_gindex,
+		'pubkeys': None,
+		'wallet_files': None
 	}
 
 	blob_cache.clear_objs(password)
