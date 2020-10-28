@@ -48,7 +48,9 @@ def main():
 	should_read_cache = settings['cachein'] is not None
 	if should_read_cache:
 		if not settings['quiet']: print("Getting scan information from cache...")
-		cached_txs, scanned_blocks = get_cached_info(settings['cachein'], password)
+		cached_info = get_cached_info(settings['cachein'], password)
+		scanned_blocks = cached_info['scanned_blocks']
+		cached_txs = cached_info['txs_by_gindex']
 
 		txs_by_gindex.update(cached_txs)
 
@@ -64,6 +66,7 @@ def main():
 		need_restore_height = True
 
 		if scanned_blocks:
+			if not settings['quiet']: print("Catching up to last scan...")
 			newest_valid = newest_block(scanned_blocks, daemon)
 			if newest_valid:
 				scanned_blocks = [newest_valid]
@@ -99,7 +102,7 @@ def main():
 	# Write txs_by_gindex and scanned_blocks to output cache
 	if settings['cacheout'] is not None:
 		cache = settings['cachein'] if settings['cachein'] is not None else BlobCache()
-		add_to_cache(cache, txs_by_gindex, scanned_blocks, password)
+		add_to_cache(cache, password, scanned_blocks, {}, [], txs_by_gindex, pubkey_by_gindex, wallet_files)
 
 		try:
 			cache_out_file = settings['cacheout']
@@ -253,51 +256,34 @@ def poll_progress_print(fmt_str, last_time, delay=1, force=False, **fmtargs):
 	else:
 		return last_time
 
-def add_to_cache(blob_cache, txs_by_gindex, scanned_blocks, password):
+def add_to_cache(blob_cache, password, scanned_blocks, wallet_outs, loose_outs, txs_by_gindex, 
+					pubkey_by_gindex, wallet_files):
 	"""
 	Add data to blob_cache in the structure below:
 
 	password -> {
-		scanned_blocks -> [
-			(hash, height)
-			...
-		]
+		scanned_blocks -> [(hash, height), ...]
 		wallet_outs -> {
-			primary address -> ]
-				gindexes
-				...
-			[
-		}
-		loose_outs -> [
-			gindexes
+			primary address -> [gindex, ...]
 			...
-		]
+		}
+		loose_outs -> [gindex, ...]
 		txs_by_gindex -> {
-			gindex -> [
-				txid
-				...
-			]
+			gindex -> [ txid, ...]
 			...
 		}
-		pubkey_by_gindex -> {
-			gindex -> pubkey
-			...
-		}
-		wallet_files -> [
-			path
-
-			...
-		]
+		pubkey_by_gindex -> { gindex -> pubkey, ...}
+		wallet_files -> [path, ...]
 	}
 	"""
 
 	cache_data = {
 		'scanned_blocks': scanned_blocks,
-		'wallet_outs': None,
-		'loose_outs': None,
+		'wallet_outs': wallets_outs,
+		'loose_outs': loose_outs,
 		'txs': txs_by_gindex,
-		'pubkeys': None,
-		'wallet_files': None
+		'pubkeys': pubkey_by_gindex,
+		'wallet_files': wallet_files
 	}
 
 	blob_cache.clear_objs(password)
@@ -307,13 +293,19 @@ def get_cached_info(blob_cache, password):
 	cached_objs = blob_cache.get_objs(password)
 
 	if not cached_objs:
-		return {}, []
-
+		return None
+	
 	cached_obj = cached_objs[0]
-	txs = {int(i): list(map(Transaction.fromjson, txs)) for i, txs in cached_obj['txs'].items()}
-	scanned_blocks = list(map(Block.fromjson, cached_obj['scanned_blocks']))
+	
+	res = {}
+	res['scanned_blocks'] = list(map(Block.fromjson, cached_obj['scanned_blocks']))
+	res['wallet_outs'] = cached_obj['wallets_outs']
+	res['loose_outs'] = cached_obj['loose_outs']
+	res['txs_by_gindex'] = {int(i): list(map(Transaction.fromjson, txs)) for i, txs in cached_obj['txs'].items()}
+	res['pubkey_by_gindex'] = {int(i) : pubkey for i, pubkey in cached_obj['pubkeys']}
+	res['wallet_files'] = cached_obj['wallet_files']
 
-	return txs, scanned_blocks
+	return res
 
 def newest_block(blocks, daemon):
 	"""
