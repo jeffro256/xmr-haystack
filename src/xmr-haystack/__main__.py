@@ -102,7 +102,7 @@ def main():
 	# Write txs_by_gindex and scanned_blocks to output cache
 	if settings['cacheout'] is not None:
 		cache = settings['cachein'] if settings['cachein'] is not None else BlobCache()
-		add_to_cache(cache, password, scanned_blocks, {}, [], txs_by_gindex, pubkey_by_gindex, wallet_files)
+		add_to_cache(cache, password, scanned_blocks, {}, [], txs_by_gindex, pubkey_by_gindex, [])
 
 		try:
 			cache_out_file = settings['cacheout']
@@ -279,10 +279,10 @@ def add_to_cache(blob_cache, password, scanned_blocks, wallet_outs, loose_outs, 
 
 	cache_data = {
 		'scanned_blocks': scanned_blocks,
-		'wallet_outs': wallets_outs,
+		'wallet_outs': wallet_outs,
 		'loose_outs': loose_outs,
 		'txs': txs_by_gindex,
-		'pubkeys': pubkey_by_gindex,
+		'pubkeys': dict(pubkey_by_gindex),
 		'wallet_files': wallet_files
 	}
 
@@ -294,16 +294,23 @@ def get_cached_info(blob_cache, password):
 
 	if not cached_objs:
 		return None
-	
+
 	cached_obj = cached_objs[0]
-	
+
 	res = {}
-	res['scanned_blocks'] = list(map(Block.fromjson, cached_obj['scanned_blocks']))
-	res['wallet_outs'] = cached_obj['wallets_outs']
-	res['loose_outs'] = cached_obj['loose_outs']
-	res['txs_by_gindex'] = {int(i): list(map(Transaction.fromjson, txs)) for i, txs in cached_obj['txs'].items()}
-	res['pubkey_by_gindex'] = {int(i) : pubkey for i, pubkey in cached_obj['pubkeys']}
-	res['wallet_files'] = cached_obj['wallet_files']
+
+	def cachemap(cache_key, res_key, func=lambda x: x):
+		if cache_key in cached_obj:
+			res[res_key] = func(cached_obj[cache_key])
+		else:
+			res[res_key] = None
+
+	cachemap('scanned_blocks', 'scanned_blocks', lambda o: [Block.fromjson(x) for x in o])
+	cachemap('wallet_outs', 'wallet_outs')
+	cachemap('loose_outs', 'loose_outs')
+	cachemap('txs', 'txs_by_gindex', lambda o: {int(i): [Transaction.fromjson(tx) for tx in txs] for i, txs in o.items()})
+	cachemap('pubkeys', 'pubkey_by_gindex', lambda o: bidict({int(i): pub for i, pub in o.items()}))
+	cachemap('wallet_files', 'wallet_files')
 
 	return res
 
