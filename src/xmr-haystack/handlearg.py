@@ -5,14 +5,19 @@ import os.path
 from .blobcache import BlobCache
 from . import xmrconn
 
+class IllegalArgumentError(ValueError):
+	pass
+
 def get_parser():
 	""" Returns an argparse.ArgumentParser object for this program """
 
 	prog = 'python3 -m xmr-haystack'
 	desc = 'America\'s favorite stealth address scanner\u2122'
 	parser = argparse.ArgumentParser(prog=prog, description=desc)
-	parser.add_argument('wallet file',
-		help='path to wallet file')
+	parser.add_argument('wallets-or-stealth-addresses',
+		nargs='+',
+		help='one or more of any combination of stealth addresses or paths to monero wallets',
+		dest='stealth_src')
 	parser.add_argument('-a', '--daemon-addr',
 		help='daemon address (e.g. node.xmr.to)',
 		default='127.0.0.1',
@@ -83,10 +88,99 @@ def validate_and_process(ns, wallet_pass=None):
 	"""
 
 	settings = {}
+	settings = validate_passive(ns, settings)
+	settings = validate_active(ns, wallet_pass, settings)
+
+	return settings
+
+def validate_passive(ns, settings={}):
+	"""
+	Checks the arguments in namespace for any conditions not handled by get_parser passively. This means that requests
+	will not be made to monero-wallet-cli and monero RPC servers. Those are handled by validate_active().
+
+	Raises a ValueError if there is a unfixable problem with the arguments. Attempts to fix
+	problems where it can and inserts defaults where argparse fell short.
+
+	ns: Namespace object returned by argparse.ArgumentParser.parse_args
+
+	Returns: a dict containing following entries:
+		'loose' -> [(str, int)], list of pairs specifying one-time outputs of format (txid, tx_offset)
+		'loose_gindexes' -> [int], list of global indexes for one-time outputs
+		'wallet_files' -> [str], lise of valid paths to monero wallet files
+		'height' -> int >= 0, height to scan from instead of default. None if program should decide
+		'daddr' -> str, valid address (port not included) of monero daemon
+		'dport' -> int, valid port of monero daemon
+		'dlogin' -> bool, True if valid login is specified, False if not specified
+		'duser' -> str, valid daemon username. None if daemon_login == False
+		'dpass' -> str, valid daemon password. None if daemon_login == False
+		'quiet' -> Bool, True if --quiet or --extra-quiet was specified
+		'vquiet' -> Bool, True if --extra-quiet was specified
+		'caching' -> bool, True if program should cache, False only if explicitly specified
+		'cachein' -> BlobCache, cache object at --cache-input file. None if not caching or unable to load cache
+		'cacheout' -> open() file, writable file at --cache-output. None if not caching
+		ALSO WHATEVER WHAT WAS PASSED TO SETTINGS
+	"""
+
+	settings = settings.copy()
+
+	# Default cache directory
 	cache_base = appdirs.user_cache_dir('xmr-haystack')
 	default_cache_path = os.path.join(cache_base, 'xmrhaystack.json')
 
-	settings['walletf'] = getattr(ns, 'wallet file')
+	# Validate stealth address positional arguments
+	loose_outs = []
+	loose_out_gindexes = []
+	wallet_files = []
+
+	for arg in ns.stealth_src:
+		# stealth address gindex test
+		try:
+			gindex = int(arg)
+
+			if gindex < 0:
+				raise IllegalArgumentError('error with argument "' + arg + '": global index cannot be less than zero')
+
+			loose_out_gindexes.append(gindex)
+
+			continue
+		except IllegalArgumentError as iae:
+			raise iae
+		except ValueError:
+			pass
+
+		# full loose pubkey format test
+		split_arg = arg.split(':')
+		if len(split_arg) == 2:
+			txid, tx_offset = split_arg
+
+			if len(txid) == 64:
+				try:
+					bytes.fromhex(txid)
+					tx_offset = int(tx_offset)
+
+					if tx_offset < 0:
+						raise IllegalArgumentException('error with argument "' + arg + '": tx offset cannot be less than zero')
+
+					loose_outs.append((txid, tx_offset))
+
+					continue
+				except IllegalArgumentError as iea:
+					raise iae
+				except ValueError:
+					pass
+
+		# wallet file test
+		if os.path.isfile(arg):
+			wallet_files.append(arg)
+
+			continue
+
+		# If we reach this far down in the loop, throw an error
+		raise ValueError('\'' + arg + '\': not recognized as stealth address, global index, or valid wallet file')
+
+	settings['loose'] = loose_outs
+	settings['loose_gindexes'] = loose_out_gindexes
+	settings['wallet_files'] = wallet_files
 
 	# Set quiet settings
 	settings['quiet'] = ns.quiet or ns.extra_quiet
@@ -112,53 +206,6 @@ def validate_and_process(ns, wallet_pass=None):
 		settings['duser'], settings['dpass'] = login_comps
 	else:
 		settings['duser'], settings['dpass'] = None, None
-
-	# Check daemon address + port + login
-	conn = xmrconn.DaemonConnection(ns.addr, ns.port, settings['duser'], settings['dpass'])
-
-	if not settings['quiet']: print("Checking daemon access...")
-	try:
-		info = conn.get_info()
-	except:
-		err_msg = 'error: daemon at {} not reachable'.format(conn.host())
-		raise ValueError(err_msg)
-
-	if 'status' not in info or info['status'] != 'OK':
-		raise ValueError('error: daemon responded unexpectedly')
-
-	settings['daddr'] = ns.addr
-	settings['dport'] = ns.port
-
-	# sync_info is a command only allowed in unrestricted RPC mode. If it isn't enabled, there's a
-	# good chance that the daemon will reject large get_transactions requests. Warn the user of this
-	if not settings['quiet']: print("Checking restricted RPC command access...")
-
-	try:
-		sync_info = conn.sync_info()
-	except:
-		err_msg = 'error: daemon at {}:{} not reachable'.format(ns.addr, ns.port)
-		raise ValueError(err_msg)
-
-	# If in unrestricted mode then resp['result']['status'] == 'OK'
-	settings['restricted'] = sync_info is None
-	if settings['restricted']:
-		if not settings['vquiet']:
-			print("Warning: daemon is in restricted RPC mode. Some functionality may not be available")
-
-	# Check monero-wallet-cli
-	settings['wallcmd'] = ns.cli_exe_file.name if ns.cli_exe_file else 'monero-wallet-cli'
-	if not xmrconn.WalletConnection.valid_executable(settings['wallcmd']):
-		err_msg_temp = 'error: command "{}" gave a bad response. Try specifying --wallet-cli-path'
-		err_msg = err_msg_temp.format(settings['wallcmd'])
-		raise ValueError(err_msg)
-
-	# Check wallet login if password is supplied
-	if wallet_pass is not None:
-		if not settings['quiet']: print("Checking wallet login...")
-		wallet = xmrconn.WalletConnection(settings['walletf'], wallet_pass, conn.host(), ns.login, cmd=settings['wallcmd'])
-
-		if not wallet.is_valid():
-			raise ValueError('error: failed to login to wallet')
 
 	# Check cache file arguments
 	settings['caching'] = not ns.no_cache
@@ -212,5 +259,57 @@ def validate_and_process(ns, wallet_pass=None):
 				except:
 					print(f"Can't write to file \"{default_cache_path}\". Continuing without cache...")
 					settings['cacheout'] = None
+
+	return settings
+
+def validate_active(ns, wallet_pass=None, settings={}):
+	settings = settings.copy()
+
+	# Check daemon address + port + login
+	conn = xmrconn.DaemonConnection(ns.addr, ns.port, settings['duser'], settings['dpass'])
+
+	if not settings['quiet']: print("Checking daemon access...")
+	try:
+		info = conn.get_info()
+	except:
+		err_msg = 'error: daemon at {} not reachable'.format(conn.host())
+		raise ValueError(err_msg)
+
+	if 'status' not in info or info['status'] != 'OK':
+		raise ValueError('error: daemon responded unexpectedly')
+
+	settings['daddr'] = ns.addr
+	settings['dport'] = ns.port
+
+	# sync_info is a command only allowed in unrestricted RPC mode. If it isn't enabled, there's a
+	# good chance that the daemon will reject large get_transactions requests. Warn the user of this
+	if not settings['quiet']: print("Checking restricted RPC command access...")
+
+	try:
+		sync_info = conn.sync_info()
+	except:
+		err_msg = 'error: daemon at {}:{} not reachable'.format(ns.addr, ns.port)
+		raise ValueError(err_msg)
+
+	# If in unrestricted mode then resp['result']['status'] == 'OK'
+	settings['restricted'] = sync_info is None
+	if settings['restricted']:
+		if not settings['vquiet']:
+			print("Warning: daemon is in restricted RPC mode. Some functionality may not be available")
+
+	# Check monero-wallet-cli
+	settings['wallcmd'] = ns.cli_exe_file.name if ns.cli_exe_file else 'monero-wallet-cli'
+	if not xmrconn.WalletConnection.valid_executable(settings['wallcmd']):
+		err_msg_temp = 'error: command "{}" gave a bad response. Try specifying --wallet-cli-path'
+		err_msg = err_msg_temp.format(settings['wallcmd'])
+		raise ValueError(err_msg)
+
+	# Check wallet login if password is supplied
+	if wallet_pass is not None:
+		if not settings['quiet']: print("Checking wallet login...")
+		wallet = xmrconn.WalletConnection(settings['walletf'], wallet_pass, conn.host(), ns.login, cmd=settings['wallcmd'])
+
+		if not wallet.is_valid():
+			raise ValueError('error: failed to login to wallet')
 
 	return settings

@@ -1,6 +1,6 @@
 # TODO
 
-* Lookup stealth addresses for every primary address in wallet
+* Move project to xmrhaystack
 * Distinguish between two wallets with same password in cache
 * Use an actual logging library
 * GUI

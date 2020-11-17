@@ -84,3 +84,17 @@ class Transaction(namedtuple('Transaction', 'hash height timestamp ins outs')):
 		""" Returns True if hashes are not equal """
 
 		return self.hash != other.hash
+
+class StealthAddress(namedtuple('StealthAddress', 'pubkey gindex')):
+	@classmethod
+	def from_gindex(cls, gindex, conn):
+		out_data = conn.get_outs([gindex])[0]
+
+		pass
+
+	@classmethod
+	def all_from_tx(cls, txid, conn):
+		pass
+
+	def __eq__(self, other):
+		return self.pubkey == other.pubkey
