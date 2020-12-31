@@ -98,3 +98,6 @@ class StealthAddress(namedtuple('StealthAddress', 'pubkey gindex')):
 
 	def __eq__(self, other):
 		return self.pubkey == other.pubkey
+
+	def __ne__(self, other):
+		return self.pubkey != other.pubkey

@@ -312,4 +312,6 @@ def validate_active(ns, wallet_pass=None, settings={}):
 		if not wallet.is_valid():
 			raise ValueError('error: failed to login to wallet')
 
+	# Validate stealth sources
+
 	return settings
